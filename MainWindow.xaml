@@ -1,0 +1,125 @@
+﻿<Window x:Class="RoboticArm.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:RoboticArm"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="450" Width="800">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition />
+            <ColumnDefinition Width="280" />
+        </Grid.ColumnDefinitions>
+
+        <Viewport3D Name="MainViewport" Grid.Column="0" ClipToBounds="True" MouseLeftButtonDown="Viewport3D_MouseLeftButtonDown" />
+
+        <ScrollViewer Grid.Column="1"
+                      Margin="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="8" VerticalAlignment="Top">
+            <TextBlock Text="Robot Arm Controls" FontSize="16" FontWeight="Bold" Margin="0,0,0,8" />
+
+            <TextBlock Text="Joint 1 (base yaw)" />
+            <Slider Name="Joint1Slider" Minimum="-90" Maximum="90" Value="0" TickFrequency="15" IsSnapToTickEnabled="False" ValueChanged="Joint1Slider_ValueChanged" />
+            <TextBlock Name="Joint1Value" Text="0°" Margin="0,0,0,8" />
+
+            <TextBlock Text="Joint 2 (shoulder pitch)" />
+            <Slider Name="Joint2Slider" Minimum="-180" Maximum="180" Value="0" TickFrequency="15" IsSnapToTickEnabled="False" ValueChanged="Joint2Slider_ValueChanged" />
+            <TextBlock Name="Joint2Value" Text="0°" Margin="0,0,0,8" />
+
+            <TextBlock Text="Joint 3 (elbow pitch)" />
+            <Slider Name="Joint3Slider" Minimum="-180" Maximum="180" Value="0" TickFrequency="15" IsSnapToTickEnabled="False" ValueChanged="Joint3Slider_ValueChanged" />
+            <TextBlock Name="Joint3Value" Text="0°" Margin="0,0,0,8" />
+
+            <Button Content="Reset" Click="ResetButton_Click" Width="100" Margin="0,8,0,0" />
+            <Separator Margin="0,8,0,8" />
+            <TextBlock Text="IK (3D)" FontWeight="Bold" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="X:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBox Name="IkXText" Width="60" Text="2.5" />
+                <TextBlock Text="Y:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                <TextBox Name="IkYText" Width="60" Text="0.5" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="Z:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <TextBox Name="IkZText" Width="60" Text="0.0" />
+                <TextBlock Text="Rx:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                <TextBox Name="IkRxText" Width="40" Text="0" />
+                <TextBlock Text="Ry:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                <TextBox Name="IkRyText" Width="40" Text="0" />
+                <TextBlock Text="Rz:" VerticalAlignment="Center" Margin="8,0,4,0" />
+                <TextBox Name="IkRzText" Width="40" Text="0" />
+            </StackPanel>
+            <Button Content="Solve 6D IK" Click="Solve6DIk_Click" Width="120" Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <CheckBox Name="UseOrientationCheck" IsChecked="True">Use Orientation</CheckBox>
+            </StackPanel>
+            <Separator Margin="0,8,0,8" />
+            <TextBlock Text="Trajectory / Keyframes" FontWeight="Bold" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Record Keyframe" Click="RecordKeyframe_Click" Width="120" />
+                <Button Content="Clear Keyframes" Click="ClearKeyframes_Click" Width="120" Margin="4,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Export Keyframes" Click="ExportKeyframes_Click" Width="120" />
+                <Button Content="Import Keyframes" Click="ImportKeyframes_Click" Width="120" Margin="4,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Play Trajectory" Click="PlayTrajectory_Click" Width="120" />
+                <Button Content="Stop Trajectory" Click="StopTrajectory_Click" Width="120" Margin="4,0,0,0" />
+            </StackPanel>
+            <Separator Margin="0,8,0,8" />
+            <TextBlock Text="Wrist Controls" FontWeight="Bold" />
+            <TextBlock Text="Wrist Pitch" />
+            <Slider Name="WristPitchSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="15" IsSnapToTickEnabled="False" ValueChanged="WristPitchSlider_ValueChanged" />
+            <TextBlock Name="WristPitchValue" Text="0°" Margin="0,0,0,8" />
+            <TextBlock Text="Wrist Roll" />
+            <Slider Name="WristRollSlider" Minimum="-180" Maximum="180" Value="0" TickFrequency="15" IsSnapToTickEnabled="False" ValueChanged="WristRollSlider_ValueChanged" />
+            <TextBlock Name="WristRollValue" Text="0°" Margin="0,0,0,8" />
+            <TextBlock Text="Gripper Open" />
+            <Slider Name="GripperOpenSlider" Minimum="0" Maximum="1" Value="0" TickFrequency="0.1" IsSnapToTickEnabled="False" ValueChanged="GripperOpenSlider_ValueChanged" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Open Gripper" Click="OpenGripper_Click" Width="100" />
+                <Button Content="Close Gripper" Click="CloseGripper_Click" Width="100" Margin="4,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Start Wrist Rotate" Click="StartWristRotate_Click" Width="120" />
+                <Button Content="Stop Wrist Rotate" Click="StopWristRotate_Click" Width="120" Margin="4,0,0,0" />
+            </StackPanel>
+            <TextBlock Text="Tool Mode" Margin="0,6,0,0" />
+            <ComboBox Name="ToolModeCombo" SelectedIndex="0">
+                <ComboBoxItem>Grip</ComboBoxItem>
+                <ComboBoxItem>Cut</ComboBoxItem>
+                <ComboBoxItem>Weld</ComboBoxItem>
+            </ComboBox>
+            <Button Content="Activate Tool" Click="ActivateTool_Click" Width="120" Margin="0,6,0,0" />
+            <CheckBox Name="ShowWristAxesCheck" IsChecked="True" Content="Show wrist axes" Margin="0,6,0,0" Checked="ShowWristAxes_Checked" Unchecked="ShowWristAxes_Checked" />
+            <TextBlock Text="Object Handling" FontWeight="Bold" Margin="0,8,0,0" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Place Object" Click="PlaceObject_Click" Width="100" />
+                <Button Content="Pick Object" Click="PickObject_Click" Width="100" Margin="4,0,0,0" />
+            </StackPanel>
+            <Button Content="Release Object" Click="ReleaseObject_Click" Width="100" Margin="0,4,0,0" />
+            <TextBlock Name="ObjectStatusText" Text="Object: free" Margin="0,4,0,0" />
+            <Separator Margin="0,8,0,8" />
+            <TextBlock Text="Automatic Pick and Place" FontWeight="Bold" />
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <TextBlock Text="Arrival (s):" VerticalAlignment="Center" />
+                <TextBox Name="ArrivalDelayText" Width="45" Text="2" Margin="4,0,8,0" />
+                <TextBlock Text="Action (s):" VerticalAlignment="Center" />
+                <TextBox Name="ActionDelayText" Width="45" Text="0.7" Margin="4,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <Button Content="Start operation" Click="StartAutomation_Click" Width="120" />
+                <Button Content="Stop Auto" Click="StopAutomation_Click" Width="100" Margin="4,0,0,0" />
+            </StackPanel>
+            <Button Content="Reset Auto Objects" Click="ResetAutomation_Click" Width="140" Margin="0,4,0,0" />
+            <TextBlock Name="AutomationStatusText" Text="Automation: idle" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <Button Content="Play Wave" Click="PlayWave_Click" Width="100" Margin="0,8,0,0" />
+            <Button Content="Stop" Click="StopWave_Click" Width="100" Margin="0,8,0,0" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
