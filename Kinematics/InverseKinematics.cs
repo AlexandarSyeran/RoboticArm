@@ -12,7 +12,8 @@ namespace RoboticArm.Kinematics
         // jointOrigins: array of joint origins in world coords (Point3D[])
         // angles: current angles in degrees (will be updated)
         // returns true if converged
-        public static bool SolvePositionIK(Point3D target, Vector3D[] jointAxes, Point3D[] jointOrigins, double[] anglesDegrees,
+        public static bool SolvePositionIK(Point3D target, Vector3D[] jointAxes,
+            Point3D[] jointOrigins, double[] anglesDegrees,
             Func<double[], (Point3D eePos, Vector3D eeDir)> forwardKinematicsFunc,
             int maxIterations = 80, double tolerance = 1e-3, double lambda = 0.1)
         {

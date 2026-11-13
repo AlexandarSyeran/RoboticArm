@@ -2,6 +2,8 @@ using System;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 
+namespace RoboticArm.Rendering
+{
 /// <summary>
 /// Simple mesh building helpers for WPF 3D primitives.
 /// </summary>
@@ -9,13 +11,14 @@ public static class MeshBuilder
 {
     // Create a box mesh centered at the origin with given dimensions.
     public static MeshGeometry3D CreateBox(double lengthX, double heightY, double depthZ)
-    {
+    {    //
         var hx = lengthX / 2.0;
         var hy = heightY / 2.0;
         var hz = depthZ / 2.0;
         var m = new MeshGeometry3D();
 
-        // 8 corners, order: (-x,-y,-z), (x,-y,-z), (x,y,-z), (-x,y,-z), (-x,-y,z), (x,-y,z), (x,y,z), (-x,y,z)
+        // 8 corners, order: (-x,-y,-z), (x,-y,-z), (x,y,-z), (-x,y,-z),
+        // (-x,-y,z), (x,-y,z), (x,y,z), (-x,y,z)
         m.Positions.Add(new Point3D(-hx, -hy, -hz)); // 0
         m.Positions.Add(new Point3D(hx, -hy, -hz));  // 1
         m.Positions.Add(new Point3D(hx, hy, -hz));   // 2
@@ -25,7 +28,7 @@ public static class MeshBuilder
         m.Positions.Add(new Point3D(hx, hy, hz));    // 6
         m.Positions.Add(new Point3D(-hx, hy, hz));   // 7
 
-        // helper
+        // helper, add triangle indices for a face 
         void T(int a, int b, int c)
         {
             m.TriangleIndices.Add(a);
@@ -45,29 +48,35 @@ public static class MeshBuilder
         m.Normals = CalculateNormals(m);
 
         // texture coords (box mapping)
-        m.TextureCoordinates.Add(new System.Windows.Point(0, 1));
-        m.TextureCoordinates.Add(new System.Windows.Point(1, 1));
-        m.TextureCoordinates.Add(new System.Windows.Point(1, 0));
-        m.TextureCoordinates.Add(new System.Windows.Point(0, 0));
-        m.TextureCoordinates.Add(new System.Windows.Point(0, 1));
-        m.TextureCoordinates.Add(new System.Windows.Point(1, 1));
-        m.TextureCoordinates.Add(new System.Windows.Point(1, 0));
-        m.TextureCoordinates.Add(new System.Windows.Point(0, 0));
+        m.TextureCoordinates.Add(new System.Windows.Point(0, 1));// front
+        m.TextureCoordinates.Add(new System.Windows.Point(1, 1));// front
+        m.TextureCoordinates.Add(new System.Windows.Point(1, 0));// front
+        m.TextureCoordinates.Add(new System.Windows.Point(0, 0));// front
+        m.TextureCoordinates.Add(new System.Windows.Point(0, 1));// back
+        m.TextureCoordinates.Add(new System.Windows.Point(1, 1));// back
+        m.TextureCoordinates.Add(new System.Windows.Point(1, 0));// back
+        m.TextureCoordinates.Add(new System.Windows.Point(0, 0));// back
 
         return m;
     }
-    // Create a sphere mesh centered at the origin with given radius, slices, and stacks.
+    // Create a sphere mesh centered at the origin with given radius, slices,
+    // and stacks.
 
     public static MeshGeometry3D CreateSphere(double radius, int slices = 16, int stacks = 12)
     {
+        // Create a sphere mesh centered at the origin
+        // with given radius, slices, and stacks.
         var m = new MeshGeometry3D();
+        // Create vertices for the sphere mesh
         for (int stack = 0; stack <= stacks; stack++)
         {
+            // phi is the polar angle from the Y-axis, from 0 to pi
             double phi = Math.PI * stack / stacks;
             double y = Math.Cos(phi);
             double r = Math.Sin(phi);
             for (int slice = 0; slice <= slices; slice++)
             {
+                // theta is the azimuthal angle around the Y-axis
                 double theta = 2.0 * Math.PI * slice / slices;
                 double x = r * Math.Cos(theta);
                 double z = r * Math.Sin(theta);
@@ -79,10 +88,13 @@ public static class MeshBuilder
                 m.TextureCoordinates.Add(new System.Windows.Point((double)slice / slices, (double)stack / stacks));
             }
         }
+        // Create triangles for the sphere mesh
         for (int stack = 0; stack < stacks; stack++)
         {
+            // two triangles per stack slice
             for (int slice = 0; slice < slices; slice++)
             {
+                // two triangles per quad
                 int a = stack * (slices + 1) + slice;
                 int b = a + slices + 1;
                 m.TriangleIndices.Add(a);
@@ -95,7 +107,8 @@ public static class MeshBuilder
         }
         return m;
     }
-    // Create a simple grid mesh in the XZ plane, centered at the origin, with given size and step.
+    // Create a simple grid mesh in the XZ plane, centered at the origin,
+    // with given size and step.
     public static MeshGeometry3D CreateGrid(double size = 10, double step = 1.0)
     {
         var m = new MeshGeometry3D();
@@ -104,6 +117,7 @@ public static class MeshBuilder
         double thickness = 0.01;
         for (double x = -half; x <= half + 1e-6; x += step)
         {
+            // Create a thin rectangle along the Z-axis at position x
             var line = CreateBox(thickness, 0.001, size);
             var t = new TranslateTransform3D(x, 0, 0);
             // transform positions and append
@@ -115,30 +129,37 @@ public static class MeshBuilder
         }
         for (double z = -half; z <= half + 1e-6; z += step)
         {
+            // Create a thin rectangle along the X-axis at position z
             var line = CreateBox(size, 0.001, thickness);
             var t = new TranslateTransform3D(0, 0, z);
             int baseIndex = m.Positions.Count;
+            // transform positions and append
             foreach (var p in line.Positions)
                 m.Positions.Add(t.Transform(p));
             foreach (var idx in line.TriangleIndices)
                 m.TriangleIndices.Add(baseIndex + idx);
         }
+        // compute normals for the grid
         m.Normals = CalculateNormals(m);
         return m;
     }
-    // Create a cylinder mesh along the Y-axis, centered at the origin, with given height and radius.
+    // Create a cylinder mesh along the Y-axis, centered at the origin,
+    // with given height and radius.
     public static MeshGeometry3D CreateCylinder(double height, double radius, int segments = 24)
     {
+        // Create a cylinder mesh along the Y-axis, centered at the origin,
         var m = new MeshGeometry3D();
         double half = height / 2.0;
         // side vertices
         for (int i = 0; i <= segments; i++)
         {
+            // angle around the circle
             double t = 2.0 * Math.PI * i / segments;
             double x = Math.Cos(t) * radius;
             double z = Math.Sin(t) * radius;
             m.Positions.Add(new Point3D(x, -half, z)); // bottom ring
             m.Positions.Add(new Point3D(x, half, z));  // top ring
+            // normals for side vertices
             var nx = Math.Cos(t);
             var nz = Math.Sin(t);
             m.Normals.Add(new Vector3D(nx, 0, nz));
@@ -147,9 +168,10 @@ public static class MeshBuilder
             m.TextureCoordinates.Add(new System.Windows.Point((double)i / segments, 0));
         }
 
-        // side triangles
+        // side triangles, two triangles per segment
         for (int i = 0; i < segments; i++)
         {
+            // indices for the two triangles of the quad
             int i0 = i * 2;
             int i1 = i0 + 1;
             int i2 = ((i + 1) * 2) % ((segments + 1) * 2);
@@ -157,14 +179,15 @@ public static class MeshBuilder
             m.TriangleIndices.Add(i0); m.TriangleIndices.Add(i3); m.TriangleIndices.Add(i1);
             m.TriangleIndices.Add(i0); m.TriangleIndices.Add(i2); m.TriangleIndices.Add(i3);
         }
-        // top and bottom caps
+        // top and bottom caps, each with a center vertex and triangles to the ring
         int baseCenterIndex = m.Positions.Count;
         m.Positions.Add(new Point3D(0, -half, 0)); // base center
-        m.Normals.Add(new Vector3D(0, -1, 0));
-        m.TextureCoordinates.Add(new System.Windows.Point(0.5, 0.5));
+        m.Normals.Add(new Vector3D(0, -1, 0));// base normal
+        m.TextureCoordinates.Add(new System.Windows.Point(0.5, 0.5));// base center texture coord
 
         for (int i = 0; i <= segments; i++)
         {
+            // bottom cap
             int p = i * 2; // bottom ring index
             m.TriangleIndices.Add(baseCenterIndex);
             m.TriangleIndices.Add(p);
@@ -178,6 +201,7 @@ public static class MeshBuilder
 
         for (int i = 0; i <= segments; i++)
         {
+            // top cap
             int p = i * 2 + 1; // top ring
             m.TriangleIndices.Add(topCenterIndex);
             m.TriangleIndices.Add(((i + 1) * 2 + 1) % ((segments + 1) * 2));
@@ -195,6 +219,7 @@ public static class MeshBuilder
     // Calculate vertex normals for a mesh by averaging face normals.
     private static Vector3DCollection CalculateNormals(MeshGeometry3D mesh)
     {
+        // Initialize normals and counts for each vertex
         var normals = new Vector3DCollection(new Vector3D[mesh.Positions.Count]);
         var counts = new int[mesh.Positions.Count];
         for (int i = 0; i < mesh.TriangleIndices.Count; i += 3)
@@ -224,4 +249,5 @@ public static class MeshBuilder
         }
         return normals;
     }
+}
 }

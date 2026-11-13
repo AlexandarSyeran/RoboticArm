@@ -8,6 +8,7 @@ namespace RoboticArm.Kinematics
         // Build a homogeneous transform: rotation about axis (unit) by degrees, then translation
         public static Matrix3D RotateAxisAngle(Vector3D axis, double degrees)
         {
+            // Rodrigues' rotation formula
             var a = axis;
             a.Normalize();
             double rad = degrees * Math.PI / 180.0;
@@ -22,6 +23,7 @@ namespace RoboticArm.Kinematics
             return m;
         }
 
+        // Build a homogeneous transform: translation by (x, y, z)
         public static Matrix3D Translate(double x, double y, double z)
         {
             var m = Matrix3D.Identity;
@@ -29,8 +31,10 @@ namespace RoboticArm.Kinematics
             return m;
         }
 
-        // Simple 2D planar IK for two-link arm in X-Y plane: returns (theta1, theta2) in degrees or null if unreachable
-        public static (double theta1, double theta2)? TwoLinkPlanarIK(double x, double y, double l1, double l2)
+        // Simple 2D planar IK for two-link arm in X-Y plane:
+        // returns (theta1, theta2) in degrees or null if unreachable
+        public static (double theta1, double theta2)?
+            TwoLinkPlanarIK(double x, double y, double l1, double l2)
         {
             double r = Math.Sqrt(x * x + y * y);
             if (r > l1 + l2 || r < Math.Abs(l1 - l2)) return null;
