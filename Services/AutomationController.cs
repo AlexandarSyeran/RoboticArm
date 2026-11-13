@@ -5,15 +5,28 @@ namespace RoboticArm.Services
 {
     public sealed class AutomationController
     {
-        private const double ObstacleClearance = 1.35;
-        // Transport heights near the workspace edge are unreachable: keep the
-        // safe height below this fraction of the arm's maximum reach.
-        private const double ReachMargin = 0.95;
+        // Low carry level used by the planner to slip under hanging obstacles.
+        private const double LowCarryLevel = 1.0;
+        // Reach is kept below this fraction of the geometric maximum so the
+        // planner never asks for a fully stretched pose.
+        private const double ReachMargin = 0.93;
+        // A pose above the base makes yaw rotation useless for one tick, and
+        // the IK can report "no progress" even though the next tick recovers.
+        private const int MaxFailedIkTicks = 100;
 
         private readonly RobotArmModel _robot;
         private readonly IReadOnlyList<AutomationItem> _items;
         private readonly IReadOnlyList<Obstacle> _obstacles;
         private readonly List<Point3D> _transportPath = new();
+        // Joint-space targets for the transport path, precomputed so the arm
+        // follows one continuous branch instead of stalling in a folded pose.
+        private readonly List<double[]> _posePlan = new();
+        private Vector3D _carryDirection = new(0, -1, 0);
+
+        private bool _manualTransfer;
+        private AutomationItem? _manualItem;
+        private Point3D _manualLiftTarget;
+        private string _routeMode = "straight";
 
         public AutomationController(
             RobotArmModel robot,
@@ -43,6 +56,7 @@ namespace RoboticArm.Services
         public AutomationPhase Phase { get; private set; } = AutomationPhase.Idle;
         public int Index { get; private set; }
         public int PathIndex { get; private set; }
+        public IReadOnlyList<Point3D> TransportPath => _transportPath;
         public Point3D PickTarget { get; private set; }
         public AutomationItem? AttachedItem { get; private set; }
         public Vector3D ToolOffset { get; private set; }
@@ -50,6 +64,7 @@ namespace RoboticArm.Services
         public string Diagnostic { get; private set; } = string.Empty;
 
         public bool IsRunning => Phase != AutomationPhase.Idle;
+        public bool IsManualTransfer => Phase != AutomationPhase.Idle && _manualTransfer;
 
         public event Action? StatusChanged;
         public event Action? DiagnosticChanged;
@@ -58,6 +73,13 @@ namespace RoboticArm.Services
         public bool Start()
         {
             SetDiagnostic(string.Empty);
+
+            if (AttachedItem != null)
+            {
+                SetStatus("Automation: place the held object first");
+                SetDiagnostic("Place or release the held object before starting the automatic run.");
+                return false;
+            }
 
             if (_items.Count == 0)
             {
@@ -79,9 +101,66 @@ namespace RoboticArm.Services
             return true;
         }
 
+        public bool StartManualPick()
+        {
+            SetDiagnostic(string.Empty);
+
+            if (AttachedItem != null)
+            {
+                SetStatus("Manual pick: gripper already holds an object");
+                return false;
+            }
+
+            var item = FindAvailableItem();
+            if (item == null)
+            {
+                SetStatus("Manual pick: no objects available");
+                SetDiagnostic("No available objects in the pickup zone.");
+                return false;
+            }
+
+            var current = _robot.ForwardKinematics().EePos;
+            var pickTarget = PickTargetFor(item);
+            var plan = PlanPath(current, pickTarget, carrying: false);
+
+            LoadPath(plan);
+            _manualLiftTarget = new Point3D(pickTarget.X, plan.Points[0].Y, pickTarget.Z);
+
+            _manualTransfer = true;
+            _manualItem = item;
+            _robot.GripperOpen = 1.0;
+            Transition(AutomationPhase.ManualPickRise, "Manual pick: moving to pickup zone");
+            return true;
+        }
+
+        public bool StartManualPlace()
+        {
+            SetDiagnostic(string.Empty);
+
+            if (AttachedItem == null)
+            {
+                SetStatus("Manual place: no object held");
+                SetDiagnostic("Pick an object before placing it.");
+                return false;
+            }
+
+            var current = _robot.ForwardKinematics().EePos;
+            var dropHover = new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z);
+            var plan = PlanPath(current, dropHover, carrying: true);
+
+            LoadPath(plan);
+
+            _manualTransfer = true;
+            _manualItem = AttachedItem;
+            Transition(AutomationPhase.ManualPlaceRise, "Manual place: lifting object");
+            return true;
+        }
+
         public void Stop(string reason)
         {
             _phaseTime = 0;
+            _failedIkTicks = 0;
+            ResetManualState();
             Phase = AutomationPhase.Idle;
             SetStatus($"Automation: stopped ({reason})");
             SetDiagnostic(reason);
@@ -91,31 +170,48 @@ namespace RoboticArm.Services
         public void ResetState()
         {
             _phaseTime = 0;
+            _failedIkTicks = 0;
+            ResetManualState();
             Phase = AutomationPhase.Idle;
             Index = 0;
             PathIndex = 0;
             _transportPath.Clear();
+            _posePlan.Clear();
             AttachedItem = null;
             ToolOffset = default;
             SetStatus("Automation: idle");
             SetDiagnostic(string.Empty);
         }
 
+        private void ResetManualState()
+        {
+            _manualTransfer = false;
+            _manualItem = null;
+            _manualLiftTarget = default;
+        }
+
         private double _phaseTime;
+        private int _failedIkTicks;
 
         public void Tick()
         {
             if (Phase == AutomationPhase.Idle)
                 return;
 
+            _phaseTime += TickSeconds;
+            UpdateAttachedPose();
+
+            if (_manualTransfer)
+            {
+                TickManual();
+                return;
+            }
+
             if (Index < 0 || Index >= _items.Count)
             {
                 Abort("Automation object list changed.");
                 return;
             }
-
-            _phaseTime += TickSeconds;
-            UpdateAttachedPose();
 
             var item = _items[Index];
 
@@ -130,9 +226,12 @@ namespace RoboticArm.Services
                     var pickIk = _robot.SolvePosition(PickTarget, 8, SpeedMultiplier);
                     if (!pickIk.Success)
                     {
-                        Abort(pickIk.Error);
+                        if (++_failedIkTicks >= MaxFailedIkTicks)
+                            Abort(pickIk.Error);
                         return;
                     }
+
+                    _failedIkTicks = 0;
 
                     SetStatus($"Automation: moving to object {Index + 1}/{_items.Count}");
                     if ((_robot.ForwardKinematics().EePos - PickTarget).Length < 0.16)
@@ -168,8 +267,9 @@ namespace RoboticArm.Services
                     break;
 
                 case AutomationPhase.MoveToDrop:
-                    SetStatus(PathIndex == 1
-                        ? "Automation: avoiding obstacle"
+                    bool avoiding = _routeMode != "straight" && PathIndex < _transportPath.Count - 1;
+                    SetStatus(avoiding
+                        ? $"Automation: avoiding obstacle ({_routeMode})"
                         : "Automation: moving to drop zone");
 
                     if (SolveWaypoint())
@@ -196,9 +296,12 @@ namespace RoboticArm.Services
                     var homeIk = _robot.SolvePosition(HomePosition, 8, SpeedMultiplier);
                     if (!homeIk.Success)
                     {
-                        Abort(homeIk.Error);
+                        if (++_failedIkTicks >= MaxFailedIkTicks)
+                            Abort(homeIk.Error);
                         return;
                     }
+
+                    _failedIkTicks = 0;
 
                     SetStatus("Automation: returning for next object");
                     if ((_robot.ForwardKinematics().EePos - HomePosition).Length < 0.2)
@@ -225,6 +328,144 @@ namespace RoboticArm.Services
                     break;
             }
         }
+
+        private void TickManual()
+        {
+            switch (Phase)
+            {
+                case AutomationPhase.ManualPickRise:
+                    SetStatus("Manual pick: moving to pickup zone");
+                    if (SolveWaypoint())
+                    {
+                        PathIndex++;
+                        Transition(AutomationPhase.ManualPickApproach, "Manual pick: moving above object");
+                    }
+                    break;
+
+                case AutomationPhase.ManualPickApproach:
+                    SetStatus("Manual pick: moving above object");
+                    if (PathIndex >= _transportPath.Count - 1)
+                    {
+                        _robot.GripperOpen = 1;
+                        Transition(AutomationPhase.ManualPickDescend, "Manual pick: lowering to object");
+                    }
+                    else if (SolveWaypoint())
+                    {
+                        PathIndex++;
+                    }
+                    break;
+
+                case AutomationPhase.ManualPickDescend:
+                    SetStatus("Manual pick: lowering to object");
+                    if (SolveWaypoint(0.16))
+                    {
+                        _robot.GripperOpen = 0;
+                        Transition(AutomationPhase.ManualPickGrip, "Manual pick: closing gripper");
+                    }
+                    break;
+
+                case AutomationPhase.ManualPickGrip:
+                    _robot.GripperOpen = 0;
+                    SetStatus("Manual pick: closing gripper");
+                    if (_phaseTime >= ActionDelay)
+                    {
+                        if (_manualItem == null || !TryAttach(_manualItem))
+                        {
+                            Abort("Manual pick: object out of reach.");
+                            return;
+                        }
+
+                        _phaseTime = 0;
+                        LoadPath(new TransportPath(new List<Point3D> { _manualLiftTarget }, "straight"));
+                        Transition(AutomationPhase.ManualPickLift, "Manual pick: lifting object");
+                    }
+                    break;
+
+                case AutomationPhase.ManualPickLift:
+                    SetStatus("Manual pick: lifting object");
+                    if (SolveWaypoint())
+                        FinishManual("Manual pick: object held - move the arm or press Place Object");
+                    break;
+
+                case AutomationPhase.ManualPlaceRise:
+                    SetStatus("Manual place: lifting object");
+                    if (SolveWaypoint())
+                    {
+                        PathIndex++;
+                        Transition(AutomationPhase.ManualPlaceCarry, "Manual place: moving to drop zone");
+                    }
+                    break;
+
+                case AutomationPhase.ManualPlaceCarry:
+                    SetStatus("Manual place: moving to drop zone");
+                    if (PathIndex >= _transportPath.Count - 1)
+                    {
+                        Transition(AutomationPhase.ManualPlaceDescend, "Manual place: lowering into drop zone");
+                    }
+                    else if (SolveWaypoint())
+                    {
+                        PathIndex++;
+                    }
+                    break;
+
+                case AutomationPhase.ManualPlaceDescend:
+                    SetStatus("Manual place: lowering into drop zone");
+                    if (SolveWaypoint(0.16))
+                    {
+                        _robot.GripperOpen = 1;
+                        Transition(AutomationPhase.ManualPlaceRelease, "Manual place: releasing object");
+                    }
+                    break;
+
+                case AutomationPhase.ManualPlaceRelease:
+                    _robot.GripperOpen = 1;
+                    SetStatus("Manual place: releasing object");
+                    if (_phaseTime >= ActionDelay)
+                    {
+                        var carried = AttachedItem?.Position ?? DropTarget;
+                        ReleaseAttached(new Point3D(DropTarget.X, carried.Y, DropTarget.Z));
+                        if (_manualItem != null)
+                            _manualItem.Completed = true;
+                        FinishManual("Manual place: object placed in drop zone");
+                    }
+                    break;
+            }
+        }
+
+        private void FinishManual(string status)
+        {
+            ResetManualState();
+            _transportPath.Clear();
+            _posePlan.Clear();
+            PathIndex = 0;
+            Phase = AutomationPhase.Idle;
+            SetStatus(status);
+            SetDiagnostic(string.Empty);
+            Finished?.Invoke();
+        }
+
+        private AutomationItem? FindAvailableItem()
+        {
+            AutomationItem? best = null;
+            double bestDistance = double.MaxValue;
+            foreach (var item in _items)
+            {
+                if (item.Completed || item.Attached)
+                    continue;
+
+                double distance = (item.Position - PickupZone).Length;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = item;
+                }
+            }
+
+            return best;
+        }
+
+        private static Point3D PickTargetFor(AutomationItem item)
+            => new(item.Position.X, Math.Max(item.Position.Y + 0.28, 0.60), item.Position.Z);
 
         public bool TryAttach(AutomationItem item)
         {
@@ -287,40 +528,176 @@ namespace RoboticArm.Services
             ToolOffset = default;
         }
 
+        // The payload rides rigidly on the wrist, so any wrist rotation makes
+        // it swing out of the envelope the planner reserved. The route is
+        // therefore planned, the actual swing along the resulting pose
+        // sequence is measured, and the envelope is grown by that amount.
         private void BuildTransportPath()
         {
-            _transportPath.Clear();
+            if (_obstacles.Count == 0)
+            {
+                // Plain run: keep the original flow - lift, then drive straight
+                // to the drop hover - instead of a planned corridor.
+                _transportPath.Clear();
+                _transportPath.Add(new Point3D(PickTarget.X, PickTarget.Y + 0.6, PickTarget.Z));
+                _transportPath.Add(new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z));
+                _routeMode = "straight";
+                PathIndex = 0;
+                _posePlan.Clear();
+                return;
+            }
 
+            var start = PickTarget;
+            var end = new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z);
+
+            double boost = 0;
+            LoadPath(PlanPath(start, end, carrying: true, boost));
+
+            for (int pass = 0; pass < 2 && _posePlan.Count == _transportPath.Count; pass++)
+            {
+                double drift = MeasurePayloadDrift();
+                if (drift <= 0.03)
+                    break;
+
+                boost = Math.Min(0.4, drift + 0.07);
+                LoadPath(PlanPath(start, end, carrying: true, boost));
+            }
+        }
+
+        private double MeasurePayloadDrift()
+        {
+            double offsetLength = ToolOffset.Length;
+            if (_posePlan.Count == 0 || offsetLength < 1e-6)
+                return 0;
+
+            var baseline = _carryDirection * offsetLength;
+            var twin = new RobotArmModel();
+            double worst = 0;
+
+            foreach (var pose in _posePlan)
+            {
+                Array.Copy(pose, twin.Angles, pose.Length);
+                var offset = twin.ToolOrientation(twin.ForwardKinematics()).Transform(ToolOffset);
+                worst = Math.Max(worst, (offset - baseline).Length);
+            }
+
+            return worst;
+        }
+
+        private void LoadPath(TransportPath plan)
+        {
+            _transportPath.Clear();
+            _transportPath.AddRange(Densify(plan.Points));
+            _routeMode = plan.Mode;
+            PathIndex = 0;
+
+            var fk = _robot.ForwardKinematics();
+            var offset = _robot.ToolOrientation(fk).Transform(ToolOffset);
+            _carryDirection = offset.Length > 1e-6 ? offset : new Vector3D(0, -1, 0);
+            _carryDirection.Normalize();
+
+            BuildPosePlan();
+        }
+
+        // Long waypoint hops let the position solver stall in a folded pose,
+        // so the route is split into short steps it can track.
+        private static IEnumerable<Point3D> Densify(IReadOnlyList<Point3D> points)
+        {
+            const double maxGap = 0.25;
+            yield return points[0];
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                var from = points[i - 1];
+                var to = points[i];
+                int steps = Math.Max(1, (int)Math.Ceiling((to - from).Length / maxGap));
+                for (int step = 1; step <= steps; step++)
+                    yield return from + (to - from) * ((double)step / steps);
+            }
+        }
+
+        private void BuildPosePlan()
+        {
+            _posePlan.Clear();
+            if (_transportPath.Count == 0)
+                return;
+
+            var poses = SolvePoseSequence((double[])_robot.Angles.Clone());
+            poses ??= SolvePoseSequence((double[])_robot.InitialFoldedAngles.Clone());
+
+            // Without a continuous joint solution the controller falls back to
+            // solving each waypoint from wherever the arm currently is.
+            if (poses != null)
+                _posePlan.AddRange(poses);
+        }
+
+        private List<double[]>? SolvePoseSequence(double[] seed)
+        {
+            var twin = new RobotArmModel();
+            Array.Copy(seed, twin.Angles, seed.Length);
+
+            var poses = new List<double[]>(_transportPath.Count);
+            foreach (var target in _transportPath)
+            {
+                if (!ConvergeTo(twin, target))
+                    return null;
+
+                poses.Add((double[])twin.Angles.Clone());
+            }
+
+            return poses;
+        }
+
+        private bool ConvergeTo(RobotArmModel twin, Point3D target)
+        {
+            for (int attempt = 0; attempt < 80; attempt++)
+            {
+                twin.SolvePosition(target, 14, 1.0);
+                if ((twin.ForwardKinematics().EePos - target).Length < 0.05)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private TransportPath PlanPath(Point3D start, Point3D end, bool carrying, double payloadBoost = 0)
+        {
+            var offset = new Vector3D();
+            double payloadHalf = 0.20;
+            if (carrying)
+            {
+                var fk = _robot.ForwardKinematics();
+                offset = _robot.ToolOrientation(fk).Transform(ToolOffset);
+                payloadHalf = 0.24 + payloadBoost;
+            }
+
+            double reach = 0;
+            foreach (var length in _robot.LinkLengths)
+                reach += length;
+            reach *= ReachMargin;
+
+            double low = LowCarryLevel;
+            double high = Math.Max(ComputeSafeHeight(start, end), low + 0.6);
+            return TransportPathPlanner.Plan(start, end, _obstacles, offset, payloadHalf, low, high, reach);
+        }
+
+        // The corridor is crossed at a height that clears the tallest obstacle.
+        // Whether that height is reachable is decided per grid cell by the
+        // planner, so the route can climb only after it has retracted inward.
+        private double ComputeSafeHeight(params Point3D[] targets)
+        {
             double highestObstacle = 0.12;
             foreach (var obstacle in _obstacles)
                 highestObstacle = Math.Max(highestObstacle, obstacle.Center.Y + obstacle.HalfSize.Y);
 
-            double safeY = Math.Max(
-                highestObstacle + ObstacleClearance,
-                Math.Max(PickTarget.Y, DropTarget.Y) + 0.85);
+            // Cross the workspace above the base fold limit even when there is
+            // nothing to avoid: a low straight line over the base is a pose
+            // the arm cannot fold into.
+            double safeY = Math.Max(highestObstacle + 0.55, 2.6);
+            foreach (var target in targets)
+                safeY = Math.Max(safeY, target.Y + 0.85);
 
-            safeY = Math.Min(safeY, GetReachableTransportHeight());
-
-            _transportPath.Add(new Point3D(PickTarget.X, safeY, PickTarget.Z));
-            _transportPath.Add(new Point3D(DropTarget.X, safeY, DropTarget.Z));
-            _transportPath.Add(new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z));
-            PathIndex = 0;
-        }
-
-        private double GetReachableTransportHeight()
-        {
-            double reach = 0;
-            foreach (var length in _robot.LinkLengths)
-                reach += length;
-
-            reach *= ReachMargin;
-
-            double radius = Math.Sqrt(PickTarget.X * PickTarget.X + PickTarget.Z * PickTarget.Z);
-            double dropRadius = Math.Sqrt(DropTarget.X * DropTarget.X + DropTarget.Z * DropTarget.Z);
-            radius = Math.Max(radius, dropRadius);
-
-            double vertical = Math.Sqrt(Math.Max(0.0, reach * reach - radius * radius));
-            return RobotArmModel.BaseHeight + vertical;
+            return safeY;
         }
 
         private bool SolveWaypoint(double tolerance = 0.18)
@@ -328,27 +705,70 @@ namespace RoboticArm.Services
             if (PathIndex >= _transportPath.Count)
                 return true;
 
+            if (_posePlan.Count == _transportPath.Count)
+            {
+                _failedIkTicks = 0;
+                return StepTowardPose(_posePlan[PathIndex]);
+            }
+
             var target = _transportPath[PathIndex];
             var ik = _robot.SolvePosition(target, 14, SpeedMultiplier);
             if (!ik.Success)
             {
-                Abort(ik.Error);
+                if (++_failedIkTicks >= MaxFailedIkTicks)
+                    Abort(ik.Error);
                 return false;
             }
 
+            _failedIkTicks = 0;
+
             double remaining = (_robot.ForwardKinematics().EePos - target).Length;
             return remaining <= tolerance;
+        }
+
+        private bool StepTowardPose(double[] goal)
+        {
+            double rate = 2.2 * SpeedMultiplier / 0.55;
+            bool reached = true;
+            for (int joint = 0; joint < _robot.Angles.Length; joint++)
+            {
+                double delta = goal[joint] - _robot.Angles[joint];
+                if (joint == 0)
+                    delta = NormalizeAngle(delta);
+                if (Math.Abs(delta) <= 1e-3)
+                    continue;
+
+                reached = false;
+                _robot.Angles[joint] += Math.Max(-rate, Math.Min(rate, delta));
+
+                // The base yaw spans a full turn: wrapping keeps a step across
+                // the +/-180 seam on the short path instead of jamming at 180.
+                if (_robot.MaxAngles[joint] - _robot.MinAngles[joint] >= 359.0)
+                    _robot.Angles[joint] = NormalizeAngle(_robot.Angles[joint]);
+            }
+
+            _robot.Clamp();
+            return reached;
+        }
+
+        private static double NormalizeAngle(double degrees)
+        {
+            while (degrees > 180.0) degrees -= 360.0;
+            while (degrees < -180.0) degrees += 360.0;
+            return degrees;
         }
 
         private void Transition(AutomationPhase phase, string status)
         {
             Phase = phase;
             _phaseTime = 0;
+            _failedIkTicks = 0;
             SetStatus(status);
         }
 
         private void Abort(string reason)
         {
+            ResetManualState();
             Phase = AutomationPhase.Idle;
             SetStatus($"Automation: stopped ({reason})");
             SetDiagnostic(reason);

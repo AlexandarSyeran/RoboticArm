@@ -123,17 +123,7 @@ namespace RoboticArm.Kinematics
                 {
                     double stepDeg = delta[i] * (180.0 / Math.PI) * gain;
                     stepDeg = Math.Max(-maxStepDeg, Math.Min(maxStepDeg, stepDeg));
-                    anglesDeg[i] += stepDeg;
-                }
-
-                // enforce joint limits if provided
-                if (minAngles != null && maxAngles != null)
-                {
-                    for (int i = 0; i < n; i++)
-                    {
-                        if (anglesDeg[i] < minAngles[i]) anglesDeg[i] = minAngles[i];
-                        if (anglesDeg[i] > maxAngles[i]) anglesDeg[i] = maxAngles[i];
-                    }
+                    anglesDeg[i] = ClampJoint(anglesDeg[i] + stepDeg, i, minAngles, maxAngles);
                 }
             }
 
@@ -172,8 +162,8 @@ namespace RoboticArm.Kinematics
                     {
                         var yawAngles = (double[])anglesDeg.Clone();
                         double yawStep = Math.Max(-maxBaseYawStep, Math.Min(maxBaseYawStep, yawError));
-                        yawAngles[0] = Math.Max(minAngles[0], Math.Min(maxAngles[0], anglesDeg[0] + yawStep));
-                        if (isCandidateSafe == null || isCandidateSafe(yawAngles))
+                        yawAngles[0] = ClampJoint(anglesDeg[0] + yawStep, 0, minAngles, maxAngles);
+                        if (yawAngles[0] != anglesDeg[0] && (isCandidateSafe == null || isCandidateSafe(yawAngles)))
                         {
                             anglesDeg[0] = yawAngles[0];
                             // The FK cache is only valid for the previous
@@ -237,12 +227,7 @@ namespace RoboticArm.Kinematics
                     Array.Copy(previousAngles, anglesDeg, n);
                     double gain = 0.8 * Math.Pow(0.5, attempt);
                     for (int i = 0; i < n; i++)
-                    {
-                        double value = previousAngles[i] + delta[i] * gain;
-                        if (minAngles != null && maxAngles != null)
-                            value = Math.Max(minAngles[i], Math.Min(maxAngles[i], value));
-                        anglesDeg[i] = value;
-                    }
+                        anglesDeg[i] = ClampJoint(previousAngles[i] + delta[i] * gain, i, minAngles, maxAngles);
 
                     var candidate = forwardKinematics(anglesDeg).eePos;
                     var candidateError = (targetPos - candidate).Length;
@@ -272,10 +257,7 @@ namespace RoboticArm.Kinematics
                             foreach (var direction in new[] { -1.0, 1.0 })
                             {
                                 Array.Copy(previousAngles, anglesDeg, n);
-                                anglesDeg[joint] += direction * step;
-
-                                if (minAngles != null && maxAngles != null)
-                                    anglesDeg[joint] = Math.Max(minAngles[joint], Math.Min(maxAngles[joint], anglesDeg[joint]));
+                                anglesDeg[joint] = ClampJoint(previousAngles[joint] + direction * step, joint, minAngles, maxAngles);
 
                                 var candidate = forwardKinematics(anglesDeg).eePos;
                                 var candidateError = (targetPos - candidate).Length;
@@ -293,9 +275,7 @@ namespace RoboticArm.Kinematics
                     if (bestJoint < 0)
                         return false;
 
-                    anglesDeg[bestJoint] += bestChange;
-                    if (minAngles != null && maxAngles != null)
-                        anglesDeg[bestJoint] = Math.Max(minAngles[bestJoint], Math.Min(maxAngles[bestJoint], anglesDeg[bestJoint]));
+                    anglesDeg[bestJoint] = ClampJoint(previousAngles[bestJoint] + bestChange, bestJoint, minAngles, maxAngles);
                 }
             }
 
@@ -353,6 +333,20 @@ namespace RoboticArm.Kinematics
             while (degrees > 180.0) degrees -= 360.0;
             while (degrees < -180.0) degrees += 360.0;
             return degrees;
+        }
+
+        // The base yaw limits span a full turn, so they form a seam rather
+        // than a stop: wrapping lets the joint pass through +/-180 instead of
+        // jamming against the limit when the target lies just across it.
+        private static double ClampJoint(double value, int joint, double[] minAngles, double[] maxAngles)
+        {
+            if (minAngles == null || maxAngles == null)
+                return value;
+
+            if (maxAngles[joint] - minAngles[joint] >= 359.0)
+                value = NormalizeAngle(value);
+
+            return Math.Max(minAngles[joint], Math.Min(maxAngles[joint], value));
         }
 
         // Solve 6x6 linear system A x = b using Gaussian elimination (simple)

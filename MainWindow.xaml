@@ -55,15 +55,20 @@
                         Value="{Binding Joint1, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint1Text}" Margin="0,0,0,8" />
 
-                <TextBlock Text="Joint 2 (shoulder pitch)" />
-                <Slider Name="Joint2Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <TextBlock Text="Joint 2 (base elevation)" />
+                <Slider Name="Joint2Slider" Minimum="-45" Maximum="45" TickFrequency="5"
                         Value="{Binding Joint2, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint2Text}" Margin="0,0,0,8" />
 
-                <TextBlock Text="Joint 3 (elbow pitch)" />
+                <TextBlock Text="Joint 3 (shoulder pitch)" />
                 <Slider Name="Joint3Slider" Minimum="-180" Maximum="180" TickFrequency="15"
                         Value="{Binding Joint3, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint3Text}" Margin="0,0,0,8" />
+
+                <TextBlock Text="Joint 4 (elbow pitch)" />
+                <Slider Name="Joint4Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                        Value="{Binding Joint4, Mode=TwoWay}" />
+                <TextBlock Text="{Binding Joint4Text}" Margin="0,0,0,8" />
 
                 <Button Content="Reset" Command="{Binding ResetCommand}" Width="100" Margin="0,8,0,0" />
                 <Separator Margin="0,8,0,8" />
@@ -107,10 +112,10 @@
                 <Separator Margin="0,8,0,8" />
 
                 <TextBlock Text="Wrist Controls" FontWeight="Bold" />
-                <TextBlock Text="Wrist Pitch" />
-                <Slider Name="WristPitchSlider" Minimum="-180" Maximum="180" TickFrequency="15"
-                        Value="{Binding Joint4, Mode=TwoWay}" />
-                <TextBlock Text="{Binding Joint4Text}" Margin="0,0,0,8" />
+                <TextBlock Text="Joint 5 (wrist pitch)" />
+                <Slider Name="Joint5Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                        Value="{Binding Joint5, Mode=TwoWay}" />
+                <TextBlock Text="{Binding Joint5Text}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Wrist Roll" />
                 <Slider Name="WristRollSlider" Minimum="-180" Maximum="180" TickFrequency="15"

@@ -5,14 +5,15 @@ A 3D robotic-arm simulator built with C# and WPF on .NET 10. The application use
 ## Features
 
 - Procedural 3D robot scene with base, links, joints, wrist, gripper, conveyor, pickup zone, and drop zone.
+- Five joints: base yaw, base elevation (`±45°`, lifts the whole arm), shoulder pitch, elbow pitch, and wrist pitch.
 - Hierarchical forward kinematics (FK).
 - 3D damped-least-squares inverse kinematics with position and optional orientation solving.
 - Configurable joint limits, including full base yaw from `-180°` to `+180°`.
 - Four-finger gripper with open/close control and wrist roll.
 - Wrist orientation axes and grip, cut, and weld tool visualizations.
-- Manual object placement, pickup, attachment, and release.
+- Guided manual pick and place: the arm travels to an available object, grasps it, and later carries it to the drop zone.
 - Automatic multi-object pick-and-place workflow.
-- Safe-height automatic transport path for obstacle avoidance.
+- Grid-based transport path planner that routes the carried object over, under, and around obstacles.
 - Transparent blue plexiglass-style conveyor surface.
 - Mouse-controlled camera orbit, zoom, and viewport interaction.
 - Timestamped keyframe recording, trajectory playback, and JSON import/export.
@@ -23,9 +24,9 @@ The **Test obstacle avoidance** button starts a separate test workflow:
 
 - Obstacles appear only while the test is active.
 - Each test generates a different random layout.
-- Obstacles are approximately the size of grasped objects (`0.32 × 0.32 × 0.32`).
-- Obstacles are placed in the robot's working path, outside the conveyor surface.
-- The robot calculates a safe path above and around the generated obstacles.
+- Obstacles come in three shapes: low wide walls that force a route over them, hanging blocks that force a route underneath, and floor-to-above-reach pillars that can only be passed around.
+- The carried object expands the obstacle envelope, so the planner keeps the payload as well as the end effector clear.
+- The robot plans the route on a height-layered grid, respecting the minimum carry radius and the arm's reach, then verifies every pose along it with inverse kinematics.
 - One object is picked up, transported to the drop zone, released, and returned home.
 - Test poses are recorded as keyframes.
 - Obstacles are removed when the test finishes or is stopped.
@@ -49,6 +50,10 @@ The **Test obstacle avoidance** button starts a separate test workflow:
 
 Enter target position and optional orientation values in the **IK (3D)** section and select **Solve 6D IK**. The solver respects the configured joint limits.
 
+### Manual pick and place
+
+**Pick Object** sends the arm from wherever it stands to the pickup zone, approaches the nearest available object, and grasps it. The arm is then free for manual movement (sliders, IK target) or **Place Object**, which lifts the object to a safe height, carries it to the drop zone, lowers and releases it. **Close Gripper** still grabs an object that is already within reach of the gripper.
+
 ### Automatic pick and place
 
 Use **Start operation** to process the conveyor objects. Use **Stop Auto** to stop the workflow and **Reset Auto Objects** to restore the initial scene and object positions.
@@ -67,6 +72,7 @@ MVVM layout: the view is a thin shell, all state and behaviour live in the view 
 - `Models/RobotArmModel.cs` - robot state, FK, IK entry points, joint limits, and poses.
 - `Models/AutomationItem.cs`, `Models/Obstacle.cs`, `Models/Keyframe.cs`, `Models/ToolMode.cs`, `Models/AutomationPhase.cs` - scene and workflow models.
 - `Services/AutomationController.cs` - automatic pick-and-place state machine and transport path.
+- `Services/TransportPathPlanner.cs` - layered grid route search for obstacle avoidance.
 - `Services/KeyframePlayer.cs` - keyframe recording and Hermite trajectory playback.
 - `Services/IDialogService.cs`, `Services/WpfDialogService.cs` - dialog abstraction and WPF implementation.
 - `Mvvm/ObservableObject.cs`, `Mvvm/RelayCommand.cs` - `INotifyPropertyChanged` base and `ICommand`.

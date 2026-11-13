@@ -46,10 +46,6 @@ namespace RoboticArm.ViewModels
         private string _automationDiagnostic = string.Empty;
         private bool _hasDiagnostic;
 
-        private bool _demoAttached;
-        private Vector3D _demoToolOffset;
-        private Point3D _demoObjectPosition;
-
         public MainViewModel(IDialogService dialogs)
         {
             _dialogs = dialogs;
@@ -59,10 +55,6 @@ namespace RoboticArm.ViewModels
             HomePosition = folded.EePos;
             PickupZone = new Point3D(folded.EePos.X, 0.30, 0);
             DropTarget = new Point3D(-PickupZone.X, PickupZone.Y, PickupZone.Z);
-            _demoObjectPosition = new Point3D(
-                folded.EePos.X,
-                Math.Max(folded.EePos.Y, 0.30),
-                folded.EePos.Z);
 
             _automation = new AutomationController(
                 Robot, _items, _obstacles, PickupZone, DropTarget, HomePosition);
@@ -89,8 +81,8 @@ namespace RoboticArm.ViewModels
             StartWristRotateCommand = new RelayCommand(() => _wristTimer.Start());
             StopWristRotateCommand = new RelayCommand(() => _wristTimer.Stop());
             ActivateToolCommand = new RelayCommand(() => ToolActivated?.Invoke((ToolMode)ToolModeIndex));
-            PlaceObjectCommand = new RelayCommand(PlaceObject);
-            PickObjectCommand = new RelayCommand(TryPickObject);
+            PlaceObjectCommand = new RelayCommand(StartManualPlace);
+            PickObjectCommand = new RelayCommand(StartManualPick);
             ReleaseObjectCommand = new RelayCommand(ReleaseObject);
             StartAutomationCommand = new RelayCommand(StartAutomation);
             StopAutomationCommand = new RelayCommand(StopAutomation);
@@ -109,8 +101,6 @@ namespace RoboticArm.ViewModels
         public IReadOnlyList<AutomationItem> Items => _items;
         public IReadOnlyList<Obstacle> Obstacles => _obstacles;
 
-        public bool DemoAttached => _demoAttached;
-        public Point3D DemoObjectPosition => _demoObjectPosition;
         public ToolMode ToolMode => (ToolMode)ToolModeIndex;
         public bool IsAutomationRunning => _automation.IsRunning;
 
@@ -143,10 +133,17 @@ namespace RoboticArm.ViewModels
             set => SetJoint(3, value);
         }
 
+        public double Joint5
+        {
+            get => Robot.Angles[4];
+            set => SetJoint(4, value);
+        }
+
         public string Joint1Text => FormatAngle(Joint1);
         public string Joint2Text => FormatAngle(Joint2);
         public string Joint3Text => FormatAngle(Joint3);
         public string Joint4Text => FormatAngle(Joint4);
+        public string Joint5Text => FormatAngle(Joint5);
 
         public double WristRoll
         {
@@ -368,6 +365,10 @@ namespace RoboticArm.ViewModels
                     OnPropertyChanged(nameof(Joint4));
                     OnPropertyChanged(nameof(Joint4Text));
                     break;
+                case 4:
+                    OnPropertyChanged(nameof(Joint5));
+                    OnPropertyChanged(nameof(Joint5Text));
+                    break;
             }
         }
 
@@ -377,10 +378,12 @@ namespace RoboticArm.ViewModels
             OnPropertyChanged(nameof(Joint2));
             OnPropertyChanged(nameof(Joint3));
             OnPropertyChanged(nameof(Joint4));
+            OnPropertyChanged(nameof(Joint5));
             OnPropertyChanged(nameof(Joint1Text));
             OnPropertyChanged(nameof(Joint2Text));
             OnPropertyChanged(nameof(Joint3Text));
             OnPropertyChanged(nameof(Joint4Text));
+            OnPropertyChanged(nameof(Joint5Text));
             OnPropertyChanged(nameof(GripperOpen));
             OnPoseChanged();
         }
@@ -393,18 +396,6 @@ namespace RoboticArm.ViewModels
 
         private void UpdateAttachedObjects()
         {
-            var fk = Robot.ForwardKinematics();
-            var toolOrientation = Robot.ToolOrientation(fk);
-
-            if (_demoAttached)
-            {
-                var offset = toolOrientation.Transform(_demoToolOffset);
-                _demoObjectPosition = new Point3D(
-                    fk.EePos.X + offset.X,
-                    fk.EePos.Y + offset.Y,
-                    fk.EePos.Z + offset.Z);
-            }
-
             _automation.UpdateAttachedPose();
         }
 
@@ -414,6 +405,7 @@ namespace RoboticArm.ViewModels
             SetJoint(1, 0);
             SetJoint(2, 0);
             SetJoint(3, 0);
+            SetJoint(4, 0);
             WristRoll = 0;
         }
 
@@ -562,27 +554,44 @@ namespace RoboticArm.ViewModels
         private void CloseGripper()
         {
             GripperOpen = 0.0;
-            TryPickObject();
+            TryAttachNearby();
         }
 
-        private void PlaceObject()
+        private void StartManualPick()
         {
-            _demoAttached = false;
-            _demoToolOffset = default;
+            if (_automation.IsRunning)
+                StopAutomation();
 
-            var fk = Robot.ForwardKinematics();
-            _demoObjectPosition = new Point3D(
-                fk.EePos.X,
-                Math.Max(fk.EePos.Y, 0.30),
-                fk.EePos.Z);
+            SetAutomationDiagnostic(string.Empty);
+            _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
+            _automation.SpeedMultiplier = AutomationSpeed;
 
-            ObjectStatus = "Object: free";
-            OnPoseChanged();
+            if (!_automation.StartManualPick())
+                return;
+
+            ObjectStatus = "Object: picking";
+            _automationTimer.Start();
         }
 
-        private void TryPickObject()
+        private void StartManualPlace()
         {
-            if (_demoAttached || _automation.AttachedItem != null)
+            if (_automation.IsRunning)
+                StopAutomation();
+
+            SetAutomationDiagnostic(string.Empty);
+            _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
+            _automation.SpeedMultiplier = AutomationSpeed;
+
+            if (!_automation.StartManualPlace())
+                return;
+
+            ObjectStatus = "Object: placing";
+            _automationTimer.Start();
+        }
+
+        private void TryAttachNearby()
+        {
+            if (_automation.AttachedItem != null)
                 return;
 
             if (Robot.GripperOpen > 0.15)
@@ -592,7 +601,6 @@ namespace RoboticArm.ViewModels
             }
 
             var fk = Robot.ForwardKinematics();
-            var toolOrientation = Robot.ToolOrientation(fk);
 
             AutomationItem? closestItem = null;
             double closestDistance = double.MaxValue;
@@ -610,27 +618,15 @@ namespace RoboticArm.ViewModels
                 }
             }
 
-            var objectPosition = closestItem?.Position ?? _demoObjectPosition;
-            var distance = objectPosition - fk.EePos;
-            if (distance.Length > RobotArmModel.PickDistance)
+            if (closestItem == null || closestDistance > RobotArmModel.PickDistance)
             {
                 ObjectStatus = "Object: move it closer to gripper";
                 return;
             }
 
-            var inverse = toolOrientation;
+            var inverse = Robot.ToolOrientation(fk);
             inverse.Invert();
-            var toolOffset = inverse.Transform(distance);
-
-            if (closestItem != null)
-            {
-                _automation.AttachManually(closestItem, toolOffset);
-            }
-            else
-            {
-                _demoAttached = true;
-                _demoToolOffset = toolOffset;
-            }
+            _automation.AttachManually(closestItem, inverse.Transform(closestItem.Position - fk.EePos));
 
             ObjectStatus = "Object: attached";
             OnPoseChanged();
@@ -638,8 +634,6 @@ namespace RoboticArm.ViewModels
 
         private void ReleaseObject()
         {
-            _demoAttached = false;
-            _demoToolOffset = default;
             _automation.DetachAttached();
             ObjectStatus = "Object: released";
             OnPoseChanged();
@@ -647,6 +641,9 @@ namespace RoboticArm.ViewModels
 
         private void StartAutomation()
         {
+            if (_automation.IsManualTransfer)
+                StopAutomation();
+
             SetAutomationDiagnostic(string.Empty);
             _automation.ArrivalDelay = ParseDelay(ArrivalDelayText, 2.0);
             _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
@@ -696,9 +693,6 @@ namespace RoboticArm.ViewModels
             _automation.ResetState();
             Robot.ResetPose();
 
-            _demoAttached = false;
-            _demoToolOffset = default;
-
             SyncJointsFromModel();
             OnPropertyChanged(nameof(WristRoll));
             OnPropertyChanged(nameof(WristRollText));
@@ -726,25 +720,57 @@ namespace RoboticArm.ViewModels
             var random = new Random(++_obstacleTestNumber * 7919);
             var forbidden = new[] { PickupZone, DropTarget };
 
-            for (int i = 0; i < 6; i++)
-            {
-                Point3D center;
-                var halfSize = new Vector3D(0.16, 0.16, 0.16);
-                int attempts = 0;
+            // Floor blocks force the arm over them, hanging blocks force it
+            // underneath, and pillars cannot be crossed at any carry level so
+            // the planner has to go around them. Hanging blocks sit near the
+            // ends: close to its base the arm cannot fold low enough to duck.
+            var types = new int[6];
+            types[0] = types[5] = 1;
+            types[1] = types[4] = 2;
+            types[2] = random.Next(2) == 0 ? 0 : 2;
+            types[3] = random.Next(2) == 0 ? 0 : 2;
 
-                do
+            const double spacing = 1.2;
+            double first = -spacing * (types.Length - 1) * 0.5;
+
+            for (int i = 0; i < types.Length; i++)
+            {
+                Point3D center = default;
+                var halfSize = new Vector3D(0.18, 0.3, 0.18);
+                double band = first + i * spacing;
+
+                for (int attempt = 0; attempt < 100; attempt++)
                 {
-                    double side = i % 2 == 0 ? -1.0 : 1.0;
-                    center = new Point3D(
-                        -2.6 + random.NextDouble() * 5.2,
-                        PickupZone.Y + 0.5,
-                        side * (1.45 + random.NextDouble() * 1.8));
-                    attempts++;
+                    double x = band + (random.NextDouble() - 0.5) * 0.16;
+                    double z = (random.NextDouble() - 0.5) * 1.1;
+
+                    switch (types[i])
+                    {
+                        case 0:
+                            // Wide low wall: only a route over the top works.
+                            halfSize = new Vector3D(0.18, 0.45, 1.7);
+                            center = new Point3D(x, 0.12 + halfSize.Y, z * 0.4);
+                            break;
+                        case 1:
+                            // Wide hanging ceiling: the arm must duck below it
+                            // while carrying the object.
+                            halfSize = new Vector3D(0.18, 0.5, 1.7);
+                            center = new Point3D(x, 2.4, z * 0.4);
+                            break;
+                        default:
+                            // Floor-to-above-reach pillar: only a way around it works.
+                            halfSize = new Vector3D(0.2, 1.6, 0.22);
+                            center = new Point3D(x, 0.2 + halfSize.Y, z * 0.5);
+                            break;
+                    }
+
+                    if (!IsNearZone(center, halfSize, forbidden[0], 0.75) &&
+                        !IsNearZone(center, halfSize, forbidden[1], 0.75) &&
+                        !OverlapsExistingObstacle(center, halfSize))
+                    {
+                        break;
+                    }
                 }
-                while (attempts < 100 &&
-                       (IsNearZone(center, halfSize, forbidden[0], 0.75) ||
-                        IsNearZone(center, halfSize, forbidden[1], 0.75) ||
-                        OverlapsExistingObstacle(center, halfSize)));
 
                 _obstacles.Add(new Obstacle { Center = center, HalfSize = halfSize });
             }
@@ -800,8 +826,8 @@ namespace RoboticArm.ViewModels
         private void WaveTick()
         {
             _waveTime += TimerMilliseconds / 1000.0;
-            Robot.Angles[2] = 30 * Math.Sin(_waveTime * 2.0);
-            Robot.Angles[3] = 20 * Math.Sin(_waveTime * 3.0 + 0.5);
+            Robot.Angles[3] = 30 * Math.Sin(_waveTime * 2.0);
+            Robot.Angles[4] = 20 * Math.Sin(_waveTime * 3.0 + 0.5);
             SyncJointsFromModel();
         }
 
@@ -835,6 +861,8 @@ namespace RoboticArm.ViewModels
         private void OnAutomationFinished()
         {
             _automationTimer.Stop();
+
+            ObjectStatus = _automation.AttachedItem != null ? "Object: attached" : "Object: free";
 
             if (_obstacleTestActive)
             {

@@ -23,10 +23,10 @@ namespace RoboticArm.Models
         public double L2 { get; init; } = 1.5;
         public double L3 { get; init; } = 1.0;
 
-        public double[] Angles { get; } = { 0, -45, 90, -90 };
-        public double[] MinAngles { get; } = { -180, -120, -150, -120 };
-        public double[] MaxAngles { get; } = { 180, 120, 150, 120 };
-        public double[] InitialFoldedAngles { get; } = { 0, -45, 90, -90 };
+        public double[] Angles { get; } = { 0, 0, -45, 90, -90 };
+        public double[] MinAngles { get; } = { -180, -45, -120, -150, -120 };
+        public double[] MaxAngles { get; } = { 180, 45, 120, 150, 120 };
+        public double[] InitialFoldedAngles { get; } = { 0, 0, -45, 90, -90 };
 
         public double WristRoll { get; set; }
         public double GripperOpen { get; set; } = 1.0;
@@ -35,15 +35,22 @@ namespace RoboticArm.Models
 
         private static readonly Vector3D[] LocalAxes =
         {
-            new(0, 1, 0),
-            new(0, 0, 1),
-            new(0, 0, 1),
-            new(0, 0, 1)
+            new(0, 1, 0),  // base yaw
+            new(0, 0, -1), // base elevation (positive lifts the arm)
+            new(0, 0, 1),  // shoulder
+            new(0, 0, 1),  // elbow
+            new(0, 0, 1)   // wrist
         };
+
+        // Local (parent-frame) rotation axis of each joint, in joint order:
+        // base yaw, base elevation, shoulder, elbow, wrist.
+        public static IReadOnlyList<Vector3D> JointAxesLocal => LocalAxes;
 
         public RobotArmModel()
         {
-            LinkLengths = new[] { L1, L2, L3, WristLength };
+            // The base yaw rotates in place, so it has no link of its own:
+            // the first segment belongs to the base-elevation joint.
+            LinkLengths = new[] { 0.0, L1, L2, L3, WristLength };
         }
 
         public FkResult ForwardKinematics() => ForwardKinematics(Angles);

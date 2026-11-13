@@ -15,14 +15,13 @@ namespace RoboticArm.Rendering
         private readonly MainViewModel _vm;
 
         private Model3DGroup? _sceneGroup;
-        private GeometryModel3D[] _linkModels = Array.Empty<GeometryModel3D>();
+        private GeometryModel3D?[] _linkModels = Array.Empty<GeometryModel3D?>();
         private MatrixTransform3D[] _linkTransforms = Array.Empty<MatrixTransform3D>();
         private GeometryModel3D? _eeSphereModel;
         private GeometryModel3D[] _gripperFingers = Array.Empty<GeometryModel3D>();
         private GeometryModel3D? _toolEffectSphere;
         private GeometryModel3D[] _wristAxes = Array.Empty<GeometryModel3D>();
         private GeometryModel3D? _radarModel;
-        private GeometryModel3D? _pickableObject;
 
         private readonly Dictionary<AutomationItem, GeometryModel3D> _itemModels = new();
         private readonly Dictionary<Obstacle, GeometryModel3D> _obstacleModels = new();
@@ -74,7 +73,6 @@ namespace RoboticArm.Rendering
             AddToolEffect();
             AddWristAxes();
             AddRadar();
-            AddDemoObject();
             AddConveyorAndZones();
 
             RebuildAutomationItems();
@@ -105,35 +103,36 @@ namespace RoboticArm.Rendering
         private void AddRobot()
         {
             int count = _vm.Robot.Angles.Length;
-            _linkModels = new GeometryModel3D[count];
+            _linkModels = new GeometryModel3D?[count];
             _linkTransforms = new MatrixTransform3D[count];
 
             double thickness = 0.28;
-            var meshes = new[]
+            var colors = new[]
             {
-                MeshBuilder.CreateCylinder(_vm.Robot.L1, thickness / 2.0, 40),
-                MeshBuilder.CreateCylinder(_vm.Robot.L2, thickness * 0.45, 36),
-                MeshBuilder.CreateCylinder(_vm.Robot.L3, thickness * 0.4, 28),
-                MeshBuilder.CreateCylinder(RobotArmModel.WristLength, thickness * 0.35, 20)
+                Color.FromRgb(120, 120, 120),
+                Color.FromRgb(200, 80, 80),
+                Color.FromRgb(80, 160, 200),
+                Color.FromRgb(160, 200, 90),
+                Color.FromRgb(200, 160, 220)
             };
-
-            var materials = new[]
-            {
-                CreateMaterial(Color.FromRgb(200, 80, 80)),
-                CreateMaterial(Color.FromRgb(80, 160, 200)),
-                CreateMaterial(Color.FromRgb(160, 200, 90)),
-                CreateMaterial(Color.FromRgb(200, 160, 220))
-            };
+            var radii = new[] { 0.0, thickness / 2.0, thickness * 0.45, thickness * 0.4, thickness * 0.35 };
+            var segments = new[] { 0, 40, 36, 28, 20 };
 
             for (int i = 0; i < count; i++)
             {
                 var transform = new MatrixTransform3D(Matrix3D.Identity);
-                var model = new GeometryModel3D(meshes[i], materials[i]) { Transform = transform };
-                _linkModels[i] = model;
                 _linkTransforms[i] = transform;
-                _sceneGroup!.Children.Add(model);
 
-                _sceneGroup.Children.Add(new GeometryModel3D(
+                double length = _vm.Robot.LinkLengths[i];
+                if (length > 0.01)
+                {
+                    var mesh = MeshBuilder.CreateCylinder(length, radii[i], segments[i]);
+                    var model = new GeometryModel3D(mesh, CreateMaterial(colors[i])) { Transform = transform };
+                    _linkModels[i] = model;
+                    _sceneGroup!.Children.Add(model);
+                }
+
+                _sceneGroup!.Children.Add(new GeometryModel3D(
                     MeshBuilder.CreateSphere(0.12, 12, 8),
                     CreateMaterial(Color.FromRgb(220, 220, 220))));
             }
@@ -195,14 +194,6 @@ namespace RoboticArm.Rendering
                 MeshBuilder.CreateCylinder(0.18, 0.025, 20),
                 CreateTransparentMaterial(Color.FromArgb(150, 40, 220, 255)));
             _sceneGroup!.Children.Add(_radarModel);
-        }
-
-        private void AddDemoObject()
-        {
-            _pickableObject = new GeometryModel3D(
-                MeshBuilder.CreateBox(0.32, 0.32, 0.32),
-                CreateMaterial(Color.FromRgb(245, 170, 45)));
-            _sceneGroup!.Children.Add(_pickableObject);
         }
 
         private void AddConveyorAndZones()
@@ -316,7 +307,6 @@ namespace RoboticArm.Rendering
 
             UpdateRobotPose();
             UpdateItemPositions();
-            UpdateDemoObject();
             UpdateRadarHits();
         }
 
@@ -327,24 +317,19 @@ namespace RoboticArm.Rendering
             var eePos = fk.EePos;
 
             Matrix3D m = Kinematics.ForwardKinematics.Translate(0, RobotArmModel.BaseHeight / 2.0, 0);
-            var localAxes = new[]
-            {
-                new Vector3D(0, 1, 0),
-                new Vector3D(0, 0, 1),
-                new Vector3D(0, 0, 1),
-                new Vector3D(0, 0, 1)
-            };
+            var localAxes = RobotArmModel.JointAxesLocal;
 
-            for (int i = 0; i < _linkModels.Length; i++)
+            for (int i = 0; i < _linkTransforms.Length; i++)
             {
                 var rotation = Kinematics.ForwardKinematics.RotateAxisAngle(localAxes[i], robot.Angles[i]);
                 m = rotation * m;
 
-                var center = Kinematics.ForwardKinematics.Translate(robot.LinkLengths[i] / 2.0, 0, 0) * m;
+                double length = robot.LinkLengths[i];
+                var center = Kinematics.ForwardKinematics.Translate(length / 2.0, 0, 0) * m;
                 var align = Kinematics.ForwardKinematics.RotateAxisAngle(new Vector3D(0, 0, 1), -90);
                 _linkTransforms[i].Matrix = align * center;
 
-                m = Kinematics.ForwardKinematics.Translate(robot.LinkLengths[i], 0, 0) * m;
+                m = Kinematics.ForwardKinematics.Translate(length, 0, 0) * m;
             }
 
             _eeSphereModel!.Transform = new TranslateTransform3D(eePos.X, eePos.Y, eePos.Z);
@@ -427,15 +412,6 @@ namespace RoboticArm.Rendering
                 var position = pair.Key.Position;
                 pair.Value.Transform = new TranslateTransform3D(position.X, position.Y, position.Z);
             }
-        }
-
-        private void UpdateDemoObject()
-        {
-            if (_pickableObject == null)
-                return;
-
-            var position = _vm.DemoObjectPosition;
-            _pickableObject.Transform = new TranslateTransform3D(position.X, position.Y, position.Z);
         }
 
         private void UpdateRadarHits()

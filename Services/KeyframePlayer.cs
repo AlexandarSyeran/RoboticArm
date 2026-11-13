@@ -73,10 +73,12 @@ namespace RoboticArm.Services
 
             for (int j = 0; j < angles.Length; j++)
             {
-                double p0 = k0.Angles[j];
-                double p1 = k1.Angles[j];
-                double p2 = k2.Angles[j];
-                double p3 = k3.Angles[j];
+                // Older files were recorded with four joints; missing values
+                // fall back to zero so imported trajectories still play.
+                double p0 = AngleAt(k0, j);
+                double p1 = AngleAt(k1, j);
+                double p2 = AngleAt(k2, j);
+                double p3 = AngleAt(k3, j);
 
                 double denom1 = Math.Max(1e-6, k2.Time - k0.Time);
                 double m1 = (p2 - p0) / denom1;
@@ -95,6 +97,9 @@ namespace RoboticArm.Services
 
             return true;
         }
+
+        private static double AngleAt(Keyframe keyframe, int index)
+            => index < keyframe.Angles.Length ? keyframe.Angles[index] : 0.0;
 
         public void Replace(IEnumerable<Keyframe> keyframes)
         {

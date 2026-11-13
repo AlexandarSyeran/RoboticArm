@@ -10,6 +10,15 @@ namespace RoboticArm.Models
         MoveToDrop,
         OpenGripper,
         ReturnHome,
-        ArrivalDelay
+        ArrivalDelay,
+        ManualPickRise,
+        ManualPickApproach,
+        ManualPickDescend,
+        ManualPickGrip,
+        ManualPickLift,
+        ManualPlaceRise,
+        ManualPlaceCarry,
+        ManualPlaceDescend,
+        ManualPlaceRelease
     }
 }
