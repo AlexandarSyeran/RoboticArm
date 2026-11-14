@@ -3,6 +3,7 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using RoboticArm.Models;
+using RoboticArm.Services;
 using RoboticArm.ViewModels;
 
 namespace RoboticArm.Rendering
@@ -22,10 +23,14 @@ namespace RoboticArm.Rendering
         private GeometryModel3D? _toolEffectSphere;
         private GeometryModel3D[] _wristAxes = Array.Empty<GeometryModel3D>();
         private GeometryModel3D? _radarModel;
+        private GeometryModel3D? _cutBeam;
+        private GeometryModel3D? _cutSpark;
 
         private readonly Dictionary<AutomationItem, GeometryModel3D> _itemModels = new();
         private readonly Dictionary<Obstacle, GeometryModel3D> _obstacleModels = new();
         private readonly Dictionary<Obstacle, GeometryModel3D> _radarHits = new();
+
+        private static readonly Transform3D HiddenTransform = new TranslateTransform3D(0, -100, 0);
 
         private DispatcherTimer? _toolEffectTimer;
         private int _toolFlash;
@@ -71,6 +76,7 @@ namespace RoboticArm.Rendering
             AddRobot();
             AddGripper();
             AddToolEffect();
+            AddCutTool();
             AddWristAxes();
             AddRadar();
             AddConveyorAndZones();
@@ -172,6 +178,27 @@ namespace RoboticArm.Rendering
             _sceneGroup!.Children.Add(_toolEffectSphere);
         }
 
+        private void AddCutTool()
+        {
+            var laserColor = Color.FromRgb(255, 70, 30);
+            _cutBeam = new GeometryModel3D(
+                MeshBuilder.CreateCylinder(1.0, 0.022, 12),
+                CreateBeamMaterial(laserColor))
+            {
+                Transform = HiddenTransform
+            };
+
+            _cutSpark = new GeometryModel3D(
+                MeshBuilder.CreateSphere(0.05, 10, 8),
+                CreateBeamMaterial(Color.FromRgb(255, 220, 90)))
+            {
+                Transform = HiddenTransform
+            };
+
+            _sceneGroup!.Children.Add(_cutBeam);
+            _sceneGroup.Children.Add(_cutSpark);
+        }
+
         private void AddWristAxes()
         {
             _wristAxes = new[]
@@ -236,16 +263,35 @@ namespace RoboticArm.Rendering
             foreach (var item in _vm.Items)
             {
                 var color = ItemPalette[Math.Abs(item.PaletteIndex) % ItemPalette.Length];
-                var model = new GeometryModel3D(
-                    MeshBuilder.CreateBox(0.32, 0.32, 0.32),
-                    CreateMaterial(color))
+                if (item.CutNormal != null && item.CutSide != 0)
+                    color = Blend(color, Colors.Black, 0.35);
+
+                var model = new GeometryModel3D(CreateItemMesh(item), CreateMaterial(color))
                 {
+                    BackMaterial = CreateMaterial(color),
                     Transform = new TranslateTransform3D(item.Position.X, item.Position.Y, item.Position.Z)
                 };
 
                 _itemModels[item] = model;
                 _sceneGroup.Children.Add(model);
             }
+        }
+
+        // Whole blocks are drawn from their half extents; cut pieces are rebuilt
+        // from the original block and the plane stored on the item.
+        private static MeshGeometry3D CreateItemMesh(AutomationItem item)
+        {
+            if (item.CutNormal == null)
+            {
+                return MeshBuilder.CreateBox(
+                    item.HalfSize.X * 2,
+                    item.HalfSize.Y * 2,
+                    item.HalfSize.Z * 2);
+            }
+
+            var (keep, offcut) = BoxSplitter.SplitPieces(
+                item.CutCenter, CutPlanner.CutHalfSize, item.CutNormal.Value);
+            return item.CutSide == 0 ? keep.Mesh : offcut.Mesh;
         }
 
         private void RebuildObstacles()
@@ -308,6 +354,7 @@ namespace RoboticArm.Rendering
             UpdateRobotPose();
             UpdateItemPositions();
             UpdateRadarHits();
+            UpdateCutTool();
         }
 
         private void UpdateRobotPose()
@@ -428,6 +475,69 @@ namespace RoboticArm.Rendering
                 obstacle.Center.X,
                 obstacle.Center.Y + obstacle.HalfSize.Y + 0.08,
                 obstacle.Center.Z);
+        }
+
+        private void UpdateCutTool()
+        {
+            if (_cutBeam == null || _cutSpark == null)
+                return;
+
+            if (!_vm.IsCutBeamOn)
+            {
+                _cutBeam.Transform = HiddenTransform;
+                _cutSpark.Transform = HiddenTransform;
+                return;
+            }
+
+            var robot = _vm.Robot;
+            var fk = robot.ForwardKinematics();
+            var orientation = robot.ToolOrientation(fk);
+            var forward = orientation.Transform(new Vector3D(1, 0, 0));
+            forward.Normalize();
+
+            var tip = new Point3D(
+                fk.EePos.X + forward.X * 0.15,
+                fk.EePos.Y + forward.Y * 0.15,
+                fk.EePos.Z + forward.Z * 0.15);
+            var target = _vm.CutPoint;
+            var delta = target - tip;
+            double length = delta.Length;
+
+            if (length < 0.02)
+            {
+                _cutBeam.Transform = HiddenTransform;
+                _cutSpark.Transform = HiddenTransform;
+                return;
+            }
+
+            var direction = delta;
+            direction.Normalize();
+            var midpoint = tip + delta * 0.5;
+
+            var group = new Transform3DGroup();
+            group.Children.Add(new ScaleTransform3D(1, length, 1));
+            group.Children.Add(new RotateTransform3D(
+                new QuaternionRotation3D(RotationFromTo(new Vector3D(0, 1, 0), direction))));
+            group.Children.Add(new TranslateTransform3D(midpoint.X, midpoint.Y, midpoint.Z));
+
+            _cutBeam.Transform = group;
+            _cutSpark.Transform = new TranslateTransform3D(target.X, target.Y, target.Z);
+        }
+
+        private static Color Blend(Color from, Color to, double amount)
+        {
+            return Color.FromRgb(
+                (byte)(from.R + (to.R - from.R) * amount),
+                (byte)(from.G + (to.G - from.G) * amount),
+                (byte)(from.B + (to.B - from.B) * amount));
+        }
+
+        private static Material CreateBeamMaterial(Color color)
+        {
+            var material = new MaterialGroup();
+            material.Children.Add(new DiffuseMaterial(new SolidColorBrush(color)));
+            material.Children.Add(new EmissiveMaterial(new SolidColorBrush(color)));
+            return material;
         }
 
         private void SetWristAxesVisible(bool visible)

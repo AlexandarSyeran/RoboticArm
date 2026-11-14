@@ -19,6 +19,7 @@ namespace RoboticArm.Models
         ManualPlaceRise,
         ManualPlaceCarry,
         ManualPlaceDescend,
-        ManualPlaceRelease
+        ManualPlaceRelease,
+        ManualPlaceRetract
     }
 }

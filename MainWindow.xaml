@@ -11,6 +11,135 @@
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <SolidColorBrush x:Key="PanelBackground" Color="#D0121A22" />
+        <SolidColorBrush x:Key="PanelBorder" Color="#FF3FA9F5" />
+        <SolidColorBrush x:Key="PanelHeader" Color="#FF6FD3FF" />
+        <SolidColorBrush x:Key="PanelText" Color="#FFE0F4FF" />
+        <SolidColorBrush x:Key="PanelSubtle" Color="#FFB8E6FF" />
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#FF17222E" />
+            <Setter Property="Foreground" Value="#FFDDF3FF" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#FF23364A" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#FF2E4A66" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#FF0E151C" />
+            <Setter Property="Foreground" Value="{StaticResource PanelText}" />
+            <Setter Property="BorderBrush" Value="#FF2E5F86" />
+            <Setter Property="CaretBrush" Value="{StaticResource PanelText}" />
+            <Setter Property="SelectionBrush" Value="{StaticResource PanelBorder}" />
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#FF17222E" />
+            <Setter Property="Foreground" Value="#FFDDF3FF" />
+            <Setter Property="BorderBrush" Value="{StaticResource PanelBorder}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="#FF17222E"
+                                                BorderBrush="{StaticResource PanelBorder}"
+                                                BorderThickness="1"
+                                                CornerRadius="3">
+                                            <Path HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,7,0"
+                                                  Data="M 0 0 L 4 4 L 8 0"
+                                                  Stroke="#FFDDF3FF"
+                                                  StrokeThickness="1.5" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Margin="6,2,24,2"
+                                              VerticalAlignment="Center"
+                                              IsHitTestVisible="False" />
+                            <Popup x:Name="PART_Popup"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Border Background="#FF17222E"
+                                        BorderBrush="{StaticResource PanelBorder}"
+                                        BorderThickness="1"
+                                        MinWidth="{TemplateBinding ActualWidth}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <ItemsPresenter />
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#FF17222E" />
+            <Setter Property="Foreground" Value="#FFDDF3FF" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemChrome"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="#FF23364A" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemChrome" Property="Background" Value="#FF2E4A66" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Background" Value="#FF2E5F86" />
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -43,12 +172,66 @@
                  Text="{Binding AutomationDiagnostic, Mode=OneWay}"
                  Visibility="{Binding HasDiagnostic, Converter={StaticResource BoolToVisibility}}" />
 
+        <Border Grid.Column="0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="12"
+                Padding="14,10"
+                CornerRadius="6"
+                Background="#E01F7A3A"
+                BorderBrush="#FF7CFF9E"
+                BorderThickness="1"
+                Visibility="{Binding HasToast, Converter={StaticResource BoolToVisibility}}">
+            <TextBlock Text="{Binding ToastMessage}"
+                       Foreground="White"
+                       FontWeight="Bold"
+                       FontSize="15"
+                       MaxWidth="430"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Column="0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Margin="12"
+                Padding="10,8"
+                CornerRadius="6"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource PanelBorder}"
+                BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="RADAR - PICKUP ZONE"
+                           Foreground="{StaticResource PanelHeader}"
+                           FontWeight="Bold"
+                           FontSize="11" />
+                <TextBlock Text="{Binding RadarSummary}"
+                           Foreground="{StaticResource PanelSubtle}"
+                           FontSize="11" />
+                <TextBlock Text="{Binding RadarReadout}"
+                           Foreground="{StaticResource PanelText}"
+                           FontFamily="Consolas"
+                           FontSize="11"
+                           Margin="0,2,0,0" />
+            </StackPanel>
+        </Border>
+
         <ScrollViewer Grid.Column="1"
                       Margin="0"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="8" VerticalAlignment="Top">
-                <TextBlock Text="Robot Arm Controls" FontSize="16" FontWeight="Bold" Margin="0,0,0,8" />
+            <Border Margin="8"
+                    Padding="10,8"
+                    CornerRadius="6"
+                    Background="{StaticResource PanelBackground}"
+                    BorderBrush="{StaticResource PanelBorder}"
+                    BorderThickness="1"
+                    TextElement.Foreground="{StaticResource PanelText}">
+            <StackPanel VerticalAlignment="Top">
+                <TextBlock Text="Robot Arm Controls"
+                           Foreground="{StaticResource PanelHeader}"
+                           FontSize="16"
+                           FontWeight="Bold"
+                           Margin="0,0,0,8" />
 
                 <TextBlock Text="Joint 1 (base yaw)" />
                 <Slider Name="Joint1Slider" Minimum="-180" Maximum="180" TickFrequency="15"
@@ -73,7 +256,7 @@
                 <Button Content="Reset" Command="{Binding ResetCommand}" Width="100" Margin="0,8,0,0" />
                 <Separator Margin="0,8,0,8" />
 
-                <TextBlock Text="IK (3D)" FontWeight="Bold" />
+                <TextBlock Text="IK (3D)" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <TextBlock Text="X:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <TextBox Width="60" Text="{Binding IkX, UpdateSourceTrigger=PropertyChanged}" />
@@ -96,7 +279,7 @@
                 </StackPanel>
                 <Separator Margin="0,8,0,8" />
 
-                <TextBlock Text="Trajectory / Keyframes" FontWeight="Bold" />
+                <TextBlock Text="Trajectory / Keyframes" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <Button Content="Record Keyframe" Command="{Binding RecordKeyframeCommand}" Width="120" />
                     <Button Content="Clear Keyframes" Command="{Binding ClearKeyframesCommand}" Width="120" Margin="4,0,0,0" />
@@ -111,7 +294,7 @@
                 </StackPanel>
                 <Separator Margin="0,8,0,8" />
 
-                <TextBlock Text="Wrist Controls" FontWeight="Bold" />
+                <TextBlock Text="Wrist Controls" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
                 <TextBlock Text="Joint 5 (wrist pitch)" />
                 <Slider Name="Joint5Slider" Minimum="-180" Maximum="180" TickFrequency="15"
                         Value="{Binding Joint5, Mode=TwoWay}" />
@@ -142,10 +325,11 @@
                     <ComboBoxItem>Weld</ComboBoxItem>
                 </ComboBox>
                 <Button Content="Activate Tool" Command="{Binding ActivateToolCommand}" Width="120" Margin="0,6,0,0" />
+                <TextBlock Text="{Binding CutStatus}" TextWrapping="Wrap" Margin="0,4,0,0" />
                 <CheckBox Content="Show wrist axes" Margin="0,6,0,0"
                           IsChecked="{Binding ShowWristAxes, Mode=TwoWay}" />
 
-                <TextBlock Text="Object Handling" FontWeight="Bold" Margin="0,8,0,0" />
+                <TextBlock Text="Object Handling" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" Margin="0,8,0,0" />
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <Button Content="Place Object" Command="{Binding PlaceObjectCommand}" Width="100" />
                     <Button Content="Pick Object" Command="{Binding PickObjectCommand}" Width="100" Margin="4,0,0,0" />
@@ -154,7 +338,7 @@
                 <TextBlock Text="{Binding ObjectStatus}" Margin="0,4,0,0" />
                 <Separator Margin="0,8,0,8" />
 
-                <TextBlock Text="Automatic Pick and Place" FontWeight="Bold" />
+                <TextBlock Text="Automatic Pick and Place" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <TextBlock Text="Arrival (s):" VerticalAlignment="Center" />
                     <TextBox Width="45" Margin="4,0,8,0"
@@ -178,6 +362,7 @@
                 <Button Content="Play Wave" Command="{Binding PlayWaveCommand}" Width="100" Margin="0,8,0,0" />
                 <Button Content="Stop" Command="{Binding StopWaveCommand}" Width="100" Margin="0,8,0,0" />
             </StackPanel>
+            </Border>
         </ScrollViewer>
     </Grid>
 </Window>

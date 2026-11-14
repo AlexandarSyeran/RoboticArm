@@ -16,9 +16,13 @@ namespace RoboticArm.Services
         private const double Inflate = 0.05;
         private const double FloorClearance = 0.16;
         private const double BaseHeight = 0.3;
-        private const double MinZ = -1.55;
-        private const double MaxZ = 1.55;
+        private const double MinZ = -2.6;
+        private const double MaxZ = 2.6;
         private const int LevelCount = 3;
+
+        // Climbing or diving mid-route is slow and makes the arm pitch, so a
+        // level change costs extra on top of the vertical travel itself.
+        private const double LevelChangePenalty = 1.2;
 
         public static TransportPath Plan(
             Point3D start,
@@ -28,7 +32,8 @@ namespace RoboticArm.Services
             double payloadHalf,
             double lowLevel,
             double highLevel,
-            double armReach = 4.74)
+            double armReach = 4.74,
+            IReadOnlyList<KeyValuePair<Point3D, Vector3D>>? offsetHints = null)
         {
             if (highLevel < lowLevel + 0.6)
                 highLevel = lowLevel + 0.6;
@@ -62,7 +67,7 @@ namespace RoboticArm.Services
 
             for (int level = 0; level < LevelCount; level++)
             {
-                if (!IsPoseClear(start.X, levels[level], start.Z, obstacles, payloadOffset, payloadHalf, armReach))
+                if (!IsPoseClear(start.X, levels[level], start.Z, obstacles, payloadOffset, payloadHalf, armReach, offsetHints))
                     continue;
 
                 int index = Index(0, 0, level, ixMin, izMin, nz);
@@ -82,7 +87,11 @@ namespace RoboticArm.Services
                 closed[current] = true;
                 Decompose(current, ixMin, izMin, nz, out int ix, out int iz, out int level);
 
-                if (ix == ixEnd && iz == izEnd)
+                // The grid is anchored at the start, so rounding can snap the
+                // goal cell just outside the arm's reach even when the real end
+                // point is reachable. Accept the neighbouring cells as goals;
+                // the exact end point is appended to the route below.
+                if (Math.Abs(ix - ixEnd) <= 1 && Math.Abs(iz - izEnd) <= 1)
                 {
                     goalNode = current;
                     break;
@@ -101,7 +110,7 @@ namespace RoboticArm.Services
 
                     double tx = NodeX(nextIx, start.X);
                     double tz = NodeZ(nextIz, start.Z);
-                    if (!IsPoseClear(tx, cy, tz, obstacles, payloadOffset, payloadHalf, armReach))
+                    if (!IsPoseClear(tx, cy, tz, obstacles, payloadOffset, payloadHalf, armReach, offsetHints))
                         continue;
 
                     Relax(Index(nextIx, nextIz, level, ixMin, izMin, nz), current, g[current] + Step,
@@ -117,16 +126,22 @@ namespace RoboticArm.Services
                         continue;
 
                     double oy = levels[other];
-                    if (IsPoseClear(cx, oy, cz, obstacles, payloadOffset, payloadHalf, armReach))
+                    if (IsPoseClear(cx, oy, cz, obstacles, payloadOffset, payloadHalf, armReach, offsetHints))
                     {
-                        Relax(Index(ix, iz, other, ixMin, izMin, nz), current, g[current] + Math.Abs(oy - cy),
+                        Relax(Index(ix, iz, other, ixMin, izMin, nz), current,
+                            g[current] + Math.Abs(oy - cy) + LevelChangePenalty,
                             g, came, open, start, end, ixMin, izMin, nz);
                     }
                 }
             }
 
             if (goalNode < 0)
-                return Straight(start, end, highLevel);
+            {
+                // No grid route exists (e.g. the grown payload envelope plugs
+                // every corridor). Callers must not drive this leg - a made-up
+                // straight line can demand poses beyond the arm's reach.
+                return new TransportPath(new List<Point3D> { start, end }, "unreachable");
+            }
 
             var raw = new List<Point3D>();
             for (int node = goalNode; node >= 0; node = came[node])
@@ -140,19 +155,9 @@ namespace RoboticArm.Services
 
             var points = Simplify(raw);
             points.Add(end);
+            points = Shortcut(points, obstacles, payloadOffset, payloadHalf, armReach, offsetHints);
 
             return new TransportPath(points, DescribeMode(raw, start, end, lowLevel, highLevel, obstacles, payloadOffset, payloadHalf));
-        }
-
-        private static TransportPath Straight(Point3D start, Point3D end, double level)
-        {
-            var points = new List<Point3D>
-            {
-                new(start.X, level, start.Z),
-                new(end.X, level, end.Z),
-                end
-            };
-            return new TransportPath(points, "straight");
         }
 
         private static List<Point3D> Simplify(List<Point3D> points)
@@ -171,6 +176,55 @@ namespace RoboticArm.Services
 
             result.Add(points[^1]);
             return result;
+        }
+
+        // The grid only moves cardinally, so its paths staircase around every
+        // corner. Cutting a corner is allowed whenever the straight segment
+        // stays clear, which removes most of the zig-zag the arm would
+        // otherwise track waypoint by waypoint.
+        private static List<Point3D> Shortcut(
+            List<Point3D> points,
+            IReadOnlyList<Obstacle> obstacles,
+            Vector3D payloadOffset,
+            double payloadHalf,
+            double armReach,
+            IReadOnlyList<KeyValuePair<Point3D, Vector3D>>? offsetHints)
+        {
+            if (points.Count < 3)
+                return points;
+
+            var result = new List<Point3D> { points[0] };
+            int anchor = 0;
+            for (int i = 2; i < points.Count; i++)
+            {
+                if (SegmentClear(points[anchor], points[i], obstacles, payloadOffset, payloadHalf, armReach, offsetHints))
+                    continue;
+
+                result.Add(points[i - 1]);
+                anchor = i - 1;
+            }
+
+            result.Add(points[^1]);
+            return result;
+        }
+
+        private static bool SegmentClear(
+            Point3D from, Point3D to,
+            IReadOnlyList<Obstacle> obstacles,
+            Vector3D payloadOffset,
+            double payloadHalf,
+            double armReach,
+            IReadOnlyList<KeyValuePair<Point3D, Vector3D>>? offsetHints)
+        {
+            int samples = Math.Max(2, (int)Math.Ceiling((to - from).Length / 0.07));
+            for (int i = 1; i < samples; i++)
+            {
+                var p = from + (to - from) * ((double)i / samples);
+                if (!IsPoseClear(p.X, p.Y, p.Z, obstacles, payloadOffset, payloadHalf, armReach, offsetHints))
+                    return false;
+            }
+
+            return true;
         }
 
         private static string DescribeMode(
@@ -238,7 +292,8 @@ namespace RoboticArm.Services
             IReadOnlyList<Obstacle> obstacles,
             Vector3D payloadOffset,
             double payloadHalf,
-            double armReach)
+            double armReach,
+            IReadOnlyList<KeyValuePair<Point3D, Vector3D>>? offsetHints)
         {
             if (y - EeHalf < FloorClearance)
                 return false;
@@ -257,9 +312,10 @@ namespace RoboticArm.Services
             if (y > maxY)
                 return false;
 
-            double px = x + payloadOffset.X;
-            double py = y + payloadOffset.Y;
-            double pz = z + payloadOffset.Z;
+            var offset = offsetHints?.Count > 0 ? NearestOffset(x, z, payloadOffset, offsetHints) : payloadOffset;
+            double px = x + offset.X;
+            double py = y + offset.Y;
+            double pz = z + offset.Z;
 
             foreach (var obstacle in obstacles)
             {
@@ -271,6 +327,34 @@ namespace RoboticArm.Services
             }
 
             return true;
+        }
+
+        // The payload hangs off the tool, so its world offset depends on the
+        // wrist orientation along the route, not on the pose the arm happened
+        // to be in when planning started. The caller feeds the offsets it
+        // measured along a previous pose plan; nodes far from that route fall
+        // back to the constant planning offset.
+        private const double HintRadius = 0.6;
+
+        private static Vector3D NearestOffset(
+            double x, double z, Vector3D fallback,
+            IReadOnlyList<KeyValuePair<Point3D, Vector3D>> hints)
+        {
+            double best = HintRadius * HintRadius;
+            Vector3D offset = fallback;
+            for (int i = 0; i < hints.Count; i++)
+            {
+                double dx = hints[i].Key.X - x;
+                double dz = hints[i].Key.Z - z;
+                double d2 = dx * dx + dz * dz;
+                if (d2 < best)
+                {
+                    best = d2;
+                    offset = hints[i].Value;
+                }
+            }
+
+            return offset;
         }
 
         // Inner workspace boundary measured from the joint limits: the arm

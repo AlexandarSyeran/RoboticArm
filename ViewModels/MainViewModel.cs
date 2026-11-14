@@ -15,6 +15,8 @@ namespace RoboticArm.ViewModels
 
         private readonly IDialogService _dialogs;
         private readonly AutomationController _automation;
+        private readonly CuttingController _cutting;
+        private readonly RadarScanner _radar;
         private readonly KeyframePlayer _keyframes = new();
         private readonly List<AutomationItem> _items = new();
         private readonly List<Obstacle> _obstacles = new();
@@ -23,6 +25,7 @@ namespace RoboticArm.ViewModels
         private readonly DispatcherTimer _waveTimer;
         private readonly DispatcherTimer _wristTimer;
         private readonly DispatcherTimer _trajectoryTimer;
+        private readonly DispatcherTimer _cutTimer;
 
         private double _waveTime;
         private int _obstacleTestNumber;
@@ -45,6 +48,12 @@ namespace RoboticArm.ViewModels
         private string _automationStatus = "Automation: idle";
         private string _automationDiagnostic = string.Empty;
         private bool _hasDiagnostic;
+        private string _cutStatus = "Cutting: idle";
+        private string _toastMessage = string.Empty;
+        private bool _hasToast;
+        private bool _cutCompleted;
+        private string _radarSummary = string.Empty;
+        private string _radarReadout = string.Empty;
 
         public MainViewModel(IDialogService dialogs)
         {
@@ -63,10 +72,18 @@ namespace RoboticArm.ViewModels
             _automation.DiagnosticChanged += () => SetAutomationDiagnostic(_automation.Diagnostic);
             _automation.Finished += OnAutomationFinished;
 
+            _cutting = new CuttingController(Robot, _items);
+            _cutting.StatusChanged += OnCuttingStatusChanged;
+            _cutting.Finished += OnCuttingFinished;
+            _cutting.ItemCut += OnItemCut;
+
+            _radar = new RadarScanner(_items, PickupZone);
+
             _automationTimer = CreateTimer(AutomationTick);
             _waveTimer = CreateTimer(WaveTick);
             _wristTimer = CreateTimer(WristRotateTick);
             _trajectoryTimer = CreateTimer(TrajectoryTick);
+            _cutTimer = CreateTimer(CuttingTick);
 
             ResetCommand = new RelayCommand(ResetJoints);
             Solve6DCommand = new RelayCommand(Solve6D);
@@ -80,7 +97,7 @@ namespace RoboticArm.ViewModels
             CloseGripperCommand = new RelayCommand(CloseGripper);
             StartWristRotateCommand = new RelayCommand(() => _wristTimer.Start());
             StopWristRotateCommand = new RelayCommand(() => _wristTimer.Stop());
-            ActivateToolCommand = new RelayCommand(() => ToolActivated?.Invoke((ToolMode)ToolModeIndex));
+            ActivateToolCommand = new RelayCommand(OnActivateTool);
             PlaceObjectCommand = new RelayCommand(StartManualPlace);
             PickObjectCommand = new RelayCommand(StartManualPick);
             ReleaseObjectCommand = new RelayCommand(ReleaseObject);
@@ -285,6 +302,41 @@ namespace RoboticArm.ViewModels
             private set => SetProperty(ref _hasDiagnostic, value);
         }
 
+        public string CutStatus
+        {
+            get => _cutStatus;
+            private set => SetProperty(ref _cutStatus, value);
+        }
+
+        public string ToastMessage
+        {
+            get => _toastMessage;
+            private set => SetProperty(ref _toastMessage, value);
+        }
+
+        public bool HasToast
+        {
+            get => _hasToast;
+            private set => SetProperty(ref _hasToast, value);
+        }
+
+        public bool IsCutting => _cutting.IsRunning;
+        public bool IsCutBeamOn => _cutting.IsBeamOn;
+        public Point3D CutPoint => _cutting.CutPoint;
+        public double CutProgress => _cutting.Progress;
+
+        public string RadarSummary
+        {
+            get => _radarSummary;
+            private set => SetProperty(ref _radarSummary, value);
+        }
+
+        public string RadarReadout
+        {
+            get => _radarReadout;
+            private set => SetProperty(ref _radarReadout, value);
+        }
+
         public ICommand ResetCommand { get; }
         public ICommand Solve6DCommand { get; }
         public ICommand RecordKeyframeCommand { get; }
@@ -324,6 +376,7 @@ namespace RoboticArm.ViewModels
             _waveTimer.Stop();
             _wristTimer.Stop();
             _trajectoryTimer.Stop();
+            _cutTimer.Stop();
         }
 
         private static DispatcherTimer CreateTimer(Action tick)
@@ -562,6 +615,7 @@ namespace RoboticArm.ViewModels
             if (_automation.IsRunning)
                 StopAutomation();
 
+            StopCutting("automation started");
             SetAutomationDiagnostic(string.Empty);
             _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
             _automation.SpeedMultiplier = AutomationSpeed;
@@ -578,6 +632,7 @@ namespace RoboticArm.ViewModels
             if (_automation.IsRunning)
                 StopAutomation();
 
+            StopCutting("automation started");
             SetAutomationDiagnostic(string.Empty);
             _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
             _automation.SpeedMultiplier = AutomationSpeed;
@@ -644,6 +699,8 @@ namespace RoboticArm.ViewModels
             if (_automation.IsManualTransfer)
                 StopAutomation();
 
+            StopCutting("automation started");
+            HideToast();
             SetAutomationDiagnostic(string.Empty);
             _automation.ArrivalDelay = ParseDelay(ArrivalDelayText, 2.0);
             _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
@@ -666,10 +723,118 @@ namespace RoboticArm.ViewModels
             }
         }
 
+        private void OnActivateTool()
+        {
+            var mode = (ToolMode)ToolModeIndex;
+            ToolActivated?.Invoke(mode);
+
+            if (mode != ToolMode.Cut)
+            {
+                StopCutting("tool switched");
+                return;
+            }
+
+            if (_cutCompleted)
+            {
+                SetAutomationDiagnostic("Cutting finished. Press Reset Auto Objects to repeat.");
+                return;
+            }
+
+            StartCutting();
+        }
+
+        private void StartCutting()
+        {
+            if (_automation.IsRunning)
+                StopAutomation();
+
+            if (_cutting.IsRunning)
+                return;
+
+            SetAutomationDiagnostic(string.Empty);
+            HideToast();
+            _cutting.SpeedMultiplier = AutomationSpeed;
+
+            if (!_cutting.Start())
+                return;
+
+            ObjectStatus = "Object: cutting";
+            _cutTimer.Start();
+        }
+
+        private void StopCutting(string reason)
+        {
+            _cutTimer.Stop();
+
+            if (_cutting.IsRunning)
+                _cutting.Stop(reason);
+
+            OnPropertyChanged(nameof(IsCutting));
+            OnPropertyChanged(nameof(IsCutBeamOn));
+        }
+
+        private void CuttingTick()
+        {
+            _cutting.Tick();
+            SyncJointsFromModel();
+            RefreshRadar();
+            OnPropertyChanged(nameof(CutProgress));
+            OnPropertyChanged(nameof(IsCutBeamOn));
+
+            if (!_cutting.IsRunning)
+                _cutTimer.Stop();
+        }
+
+        private void OnCuttingStatusChanged()
+        {
+            CutStatus = _cutting.Status;
+            OnPropertyChanged(nameof(IsCutting));
+            OnPropertyChanged(nameof(IsCutBeamOn));
+        }
+
+        private void OnCuttingFinished()
+        {
+            _cutTimer.Stop();
+            OnPropertyChanged(nameof(IsCutting));
+            OnPropertyChanged(nameof(IsCutBeamOn));
+
+            if (_cutting.ObjectsCut >= _items.Count)
+            {
+                _cutCompleted = true;
+                ShowToast("Cutting operation finished. Press Reset Auto Objects to repeat.");
+                ObjectStatus = "Object: cut";
+            }
+            else
+            {
+                SetAutomationDiagnostic(_cutting.Status);
+            }
+        }
+
+        // A finished object leaves the scene and both halves join the item
+        // list, so the automation transports them like any other object.
+        private void OnItemCut(AutomationItem item, Vector3D normal)
+        {
+            int index = _items.IndexOf(item);
+            if (index < 0)
+                return;
+
+            var (keep, offcut) = CutPlanner.Split(item, normal);
+            _items.RemoveAt(index);
+            _items.Insert(index, keep);
+            _items.Insert(index + 1, offcut);
+            RefreshRadar();
+            AutomationSceneChanged?.Invoke();
+        }
+
         private void ResetAutomationObjects()
         {
             _automationTimer.Stop();
             _automation.Stop("Automation stopped.");
+
+            _cutTimer.Stop();
+            _cutting.ResetState();
+            _cutCompleted = false;
+            HideToast();
 
             _items.Clear();
             var positions = new[]
@@ -697,7 +862,35 @@ namespace RoboticArm.ViewModels
             OnPropertyChanged(nameof(WristRoll));
             OnPropertyChanged(nameof(WristRollText));
             OnPropertyChanged(nameof(GripperOpen));
+            RefreshRadar();
             AutomationSceneChanged?.Invoke();
+        }
+
+        // The radar panel shows exactly what the sensor reports: object count,
+        // measured size in centimetres, and world coordinates.
+        private void RefreshRadar()
+        {
+            var detected = _radar.Scan();
+            RadarSummary = detected.Count == 0
+                ? "no objects detected"
+                : $"{detected.Count} object{(detected.Count == 1 ? string.Empty : "s")} detected";
+
+            if (detected.Count == 0)
+            {
+                RadarReadout = "-";
+                return;
+            }
+
+            var lines = new List<string>(detected.Count);
+            for (int i = 0; i < detected.Count; i++)
+            {
+                var d = detected[i];
+                lines.Add(
+                    $"#{i + 1}: {d.HalfSize.X * 200,3:0}x{d.HalfSize.Y * 200,3:0}x{d.HalfSize.Z * 200,3:0} cm" +
+                    $"   x {d.Position.X,5:0.00}  y {d.Position.Y,4:0.00}  z {d.Position.Z,5:0.00}");
+            }
+
+            RadarReadout = string.Join(Environment.NewLine, lines);
         }
 
         private void TestObstacleAvoidance()
@@ -717,85 +910,8 @@ namespace RoboticArm.ViewModels
         private void GenerateObstacleLayout()
         {
             _obstacles.Clear();
-            var random = new Random(++_obstacleTestNumber * 7919);
-            var forbidden = new[] { PickupZone, DropTarget };
-
-            // Floor blocks force the arm over them, hanging blocks force it
-            // underneath, and pillars cannot be crossed at any carry level so
-            // the planner has to go around them. Hanging blocks sit near the
-            // ends: close to its base the arm cannot fold low enough to duck.
-            var types = new int[6];
-            types[0] = types[5] = 1;
-            types[1] = types[4] = 2;
-            types[2] = random.Next(2) == 0 ? 0 : 2;
-            types[3] = random.Next(2) == 0 ? 0 : 2;
-
-            const double spacing = 1.2;
-            double first = -spacing * (types.Length - 1) * 0.5;
-
-            for (int i = 0; i < types.Length; i++)
-            {
-                Point3D center = default;
-                var halfSize = new Vector3D(0.18, 0.3, 0.18);
-                double band = first + i * spacing;
-
-                for (int attempt = 0; attempt < 100; attempt++)
-                {
-                    double x = band + (random.NextDouble() - 0.5) * 0.16;
-                    double z = (random.NextDouble() - 0.5) * 1.1;
-
-                    switch (types[i])
-                    {
-                        case 0:
-                            // Wide low wall: only a route over the top works.
-                            halfSize = new Vector3D(0.18, 0.45, 1.7);
-                            center = new Point3D(x, 0.12 + halfSize.Y, z * 0.4);
-                            break;
-                        case 1:
-                            // Wide hanging ceiling: the arm must duck below it
-                            // while carrying the object.
-                            halfSize = new Vector3D(0.18, 0.5, 1.7);
-                            center = new Point3D(x, 2.4, z * 0.4);
-                            break;
-                        default:
-                            // Floor-to-above-reach pillar: only a way around it works.
-                            halfSize = new Vector3D(0.2, 1.6, 0.22);
-                            center = new Point3D(x, 0.2 + halfSize.Y, z * 0.5);
-                            break;
-                    }
-
-                    if (!IsNearZone(center, halfSize, forbidden[0], 0.75) &&
-                        !IsNearZone(center, halfSize, forbidden[1], 0.75) &&
-                        !OverlapsExistingObstacle(center, halfSize))
-                    {
-                        break;
-                    }
-                }
-
-                _obstacles.Add(new Obstacle { Center = center, HalfSize = halfSize });
-            }
-
+            _obstacles.AddRange(ObstacleLayout.Generate(Math.Abs(PickupZone.X), ++_obstacleTestNumber));
             AutomationSceneChanged?.Invoke();
-        }
-
-        private static bool IsNearZone(Point3D center, Vector3D halfSize, Point3D zone, double margin)
-        {
-            return Math.Abs(center.X - zone.X) < halfSize.X + margin &&
-                   Math.Abs(center.Z - zone.Z) < halfSize.Z + margin;
-        }
-
-        private bool OverlapsExistingObstacle(Point3D center, Vector3D halfSize)
-        {
-            foreach (var obstacle in _obstacles)
-            {
-                if (Math.Abs(center.X - obstacle.Center.X) < halfSize.X + obstacle.HalfSize.X + 0.15 &&
-                    Math.Abs(center.Z - obstacle.Center.Z) < halfSize.Z + obstacle.HalfSize.Z + 0.15)
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         private void PlayWave()
@@ -818,6 +934,7 @@ namespace RoboticArm.ViewModels
 
             _automation.Tick();
             SyncJointsFromModel();
+            RefreshRadar();
 
             if (!_automation.IsRunning)
                 _automationTimer.Stop();
@@ -875,7 +992,25 @@ namespace RoboticArm.ViewModels
                 _obstacleTestActive = false;
             }
 
+            if (_automation.Diagnostic == "Operation finished")
+            {
+                SetAutomationDiagnostic(string.Empty);
+                ShowToast("Transport operation finished. Press Reset Auto Objects to repeat.");
+            }
+
             OnPropertyChanged(nameof(IsAutomationRunning));
+        }
+
+        private void ShowToast(string message)
+        {
+            ToastMessage = message;
+            HasToast = true;
+        }
+
+        private void HideToast()
+        {
+            HasToast = false;
+            ToastMessage = string.Empty;
         }
 
         private void SetAutomationDiagnostic(string message)

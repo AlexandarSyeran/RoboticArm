@@ -32,7 +32,7 @@ namespace RoboticArm.Kinematics
         }
 
         // Simple 2D planar IK for two-link arm in X-Y plane:
-        // returns (theta1, theta2) in degrees or null if unreachable
+        //  returns (theta1, theta2) in degrees or null if unreachable
         public static (double theta1, double theta2)?
             TwoLinkPlanarIK(double x, double y, double l1, double l2)
         {
