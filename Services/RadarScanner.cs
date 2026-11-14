@@ -9,19 +9,21 @@ namespace RoboticArm.Services
         Vector3D HalfSize,
         double Distance);
 
-    // Stand-in for the workspace sensor: reports the objects resting in the
-    // pickup zone with their measured position and size, nearest first.
+    // Stand-in for the workspace sensor: reports the objects resting in a
+    // zone with their measured position and size, nearest first.
     public sealed class RadarScanner
     {
         public const double ZoneHalfExtent = 0.9;
 
         private readonly IReadOnlyList<AutomationItem> _items;
         private readonly Point3D _zoneCenter;
+        private readonly bool _includeCompleted;
 
-        public RadarScanner(IReadOnlyList<AutomationItem> items, Point3D zoneCenter)
+        public RadarScanner(IReadOnlyList<AutomationItem> items, Point3D zoneCenter, bool includeCompleted = false)
         {
             _items = items;
             _zoneCenter = zoneCenter;
+            _includeCompleted = includeCompleted;
         }
 
         public List<RadarDetection> Scan()
@@ -29,7 +31,7 @@ namespace RoboticArm.Services
             var found = new List<RadarDetection>();
             foreach (var item in _items)
             {
-                if (item.Completed || item.Attached)
+                if (item.Attached || (!_includeCompleted && item.Completed))
                     continue;
 
                 if (Math.Abs(item.Position.X - _zoneCenter.X) > ZoneHalfExtent ||

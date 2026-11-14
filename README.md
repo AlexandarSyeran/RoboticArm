@@ -57,7 +57,7 @@ Enter target position and optional orientation values in the **IK (3D)** section
 
 ### Automatic pick and place
 
-Use **Start operation** to process the conveyor objects. Use **Stop Auto** to stop the workflow and **Reset Auto Objects** to restore the initial scene and object positions. When the radar scan comes back empty, the run ends and a green message in the top-right corner reports that the transport operation finished; **Reset Auto Objects** clears it and restores the scene. The command panel uses the same dark palette as the radar readout.
+Use **Start operation** to process the conveyor objects. Use **Stop Auto** to stop the workflow and **Reset Auto Objects** to restore the initial scene and object positions. Objects are arranged in the drop zone like a pallet: a 2x2 grid, four objects per level, with the next four stacked on top, so they never land inside each other; the arrangement uses the internal drop scan and applies to both **Start operation** and manual **Place Object**. When the radar scan comes back empty, the run ends and a green message in the top-right corner reports that the transport operation finished; **Reset Auto Objects** clears it and restores the scene. The command panel uses the same dark palette as the radar readout.
 
 ### Laser cutting
 

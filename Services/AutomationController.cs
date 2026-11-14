@@ -13,11 +13,18 @@ namespace RoboticArm.Services
         // A pose above the base makes yaw rotation useless for one tick, and
         // the IK can report "no progress" even though the next tick recovers.
         private const int MaxFailedIkTicks = 100;
+        // Drop-zone layout: a 2x2 grid, four objects per level; the next four
+        // stack on top of them.
+        private const double DropSlotOffset = 0.22;
+        private const double DropSlotRadius = 0.26;
+        private const double DropHoverGap = 0.29;
 
         private readonly RobotArmModel _robot;
         private readonly IReadOnlyList<AutomationItem> _items;
         private readonly IReadOnlyList<Obstacle> _obstacles;
         private readonly RadarScanner _radar;
+        // Internal drop-zone scan; the radar panel keeps showing the pickup zone.
+        private readonly RadarScanner _dropRadar;
         private readonly List<Point3D> _transportPath = new();
         // Joint-space targets for the transport path, precomputed so the arm
         // follows one continuous branch instead of stalling in a folded pose.
@@ -26,6 +33,8 @@ namespace RoboticArm.Services
         private bool _manualTransfer;
         private AutomationItem? _manualItem;
         private Point3D _manualLiftTarget;
+        private Point3D _manualDropSlot;
+        private Point3D _dropSlot;
         private string _routeMode = "straight";
 
         // Payload half extent used by the planner, taken from the attached
@@ -47,6 +56,7 @@ namespace RoboticArm.Services
             DropTarget = dropTarget;
             HomePosition = homePosition;
             _radar = new RadarScanner(items, pickupZone);
+            _dropRadar = new RadarScanner(items, dropTarget, includeCompleted: true);
         }
 
         public Point3D PickupZone { get; }
@@ -172,7 +182,8 @@ namespace RoboticArm.Services
             }
 
             var current = _robot.ForwardKinematics().EePos;
-            var dropHover = new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z);
+            _manualDropSlot = ChooseDropSlot(AttachedItem);
+            var dropHover = DropHoverFor(_manualDropSlot);
             var plan = PlanPath(current, dropHover, carrying: true);
             if (plan.Mode == "unreachable")
             {
@@ -316,8 +327,7 @@ namespace RoboticArm.Services
                     SetStatus("Automation: releasing object");
                     if (_phaseTime >= ActionDelay)
                     {
-                        var carried = AttachedItem?.Position ?? DropTarget;
-                        ReleaseAttached(new Point3D(DropTarget.X, carried.Y, DropTarget.Z));
+                        ReleaseAttached(_dropSlot);
                         item.Completed = true;
                         Transition(AutomationPhase.ReturnHome, "Automation: returning home");
                     }
@@ -453,8 +463,7 @@ namespace RoboticArm.Services
                     SetStatus("Manual place: releasing object");
                     if (_phaseTime >= ActionDelay)
                     {
-                        var carried = AttachedItem?.Position ?? DropTarget;
-                        ReleaseAttached(new Point3D(DropTarget.X, carried.Y, DropTarget.Z));
+                        ReleaseAttached(_manualDropSlot);
                         if (_manualItem != null)
                             _manualItem.Completed = true;
 
@@ -462,9 +471,9 @@ namespace RoboticArm.Services
                         // manual pick starts from a low stretched pose right on
                         // the drop zone.
                         var lift = new Point3D(
-                            DropTarget.X,
-                            Math.Max(_robot.ForwardKinematics().EePos.Y + 0.55, DropTarget.Y + 0.45),
-                            DropTarget.Z);
+                            _manualDropSlot.X,
+                            Math.Max(_robot.ForwardKinematics().EePos.Y + 0.55, _manualDropSlot.Y + 0.45),
+                            _manualDropSlot.Z);
                         LoadPath(new TransportPath(new List<Point3D> { lift }, "straight"));
                         Transition(AutomationPhase.ManualPlaceRetract, "Manual place: lifting away from the drop zone");
                     }
@@ -516,6 +525,56 @@ namespace RoboticArm.Services
             => new(item.Position.X,
                    Math.Max(item.Position.Y + item.HalfSize.Y + 0.12, 0.60),
                    item.Position.Z);
+
+        // The arm arranges the drop zone like a pallet: a 2x2 grid, four
+        // objects per level, the next four on top. Already placed objects come
+        // from the internal drop scan, so a new object lands beside or above
+        // them instead of inside them.
+        private Point3D ChooseDropSlot(AutomationItem? item)
+        {
+            double halfY = item?.HalfSize.Y ?? 0.16;
+            var placed = _dropRadar.Scan();
+            double[] offsets = { -DropSlotOffset, DropSlotOffset };
+            var best = new Point3D(
+                DropTarget.X - DropSlotOffset,
+                DropTarget.Y + halfY,
+                DropTarget.Z - DropSlotOffset);
+            int bestCount = int.MaxValue;
+            double bestTop = DropTarget.Y;
+
+            foreach (double dx in offsets)
+            {
+                foreach (double dz in offsets)
+                {
+                    double x = DropTarget.X + dx;
+                    double z = DropTarget.Z + dz;
+                    int count = 0;
+                    double top = DropTarget.Y;
+
+                    foreach (var detection in placed)
+                    {
+                        if (Math.Abs(detection.Position.X - x) <= DropSlotRadius &&
+                            Math.Abs(detection.Position.Z - z) <= DropSlotRadius)
+                        {
+                            count++;
+                            top = Math.Max(top, detection.Position.Y + detection.HalfSize.Y);
+                        }
+                    }
+
+                    if (count < bestCount)
+                    {
+                        bestCount = count;
+                        bestTop = top;
+                        best = new Point3D(x, top + halfY, z);
+                    }
+                }
+            }
+
+            return best;
+        }
+
+        private static Point3D DropHoverFor(Point3D slot)
+            => new(slot.X, slot.Y + DropHoverGap, slot.Z);
 
         public bool TryAttach(AutomationItem item)
         {
@@ -591,13 +650,16 @@ namespace RoboticArm.Services
         // sequence is measured, and the envelope is grown by that amount.
         private void BuildTransportPath()
         {
+            _dropSlot = ChooseDropSlot(AttachedItem);
+            var dropHover = DropHoverFor(_dropSlot);
+
             if (_obstacles.Count == 0)
             {
                 // Plain run: keep the original flow - lift, then drive straight
                 // to the drop hover - instead of a planned corridor.
                 _transportPath.Clear();
                 _transportPath.Add(new Point3D(PickTarget.X, PickTarget.Y + 0.6, PickTarget.Z));
-                _transportPath.Add(new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z));
+                _transportPath.Add(dropHover);
                 _routeMode = "straight";
                 PathIndex = 0;
                 _posePlan.Clear();
@@ -605,7 +667,7 @@ namespace RoboticArm.Services
             }
 
             var start = PickTarget;
-            var end = new Point3D(DropTarget.X, DropTarget.Y + 0.45, DropTarget.Z);
+            var end = dropHover;
 
             var first = PlanPath(start, end, carrying: true, 0);
             if (first.Mode == "unreachable")
