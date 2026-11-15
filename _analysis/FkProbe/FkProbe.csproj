@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Program2.cs" />
+    <Compile Include="Program3.cs" />
+    <Compile Include="Program4.cs" />
+    <Compile Include="Program5.cs" />
+    <Compile Include="Program6.cs" />
+    <Compile Include="Program7.cs" />
+    <Compile Include="Program8.cs" />
+    <Compile Include="Program9.cs" />
+    <Compile Include="Program10.cs" />
+    <Compile Include="Program11.cs" />
+    <Compile Include="Program12.cs" />
+    <Compile Include="Program13.cs" />
+    <Compile Include="Program14.cs" />
+    <Compile Include="Program15.cs" />
+    <Compile Include="Program16.cs" />
+    <Compile Include="Program17.cs" />
+    <Compile Include="Program18.cs" />
+    <Compile Include="Program19.cs" />
+    <Compile Include="Program20.cs" />
+    <Compile Include="Program21.cs" />
+    <Compile Include="Program22.cs" />
+    <Compile Include="Program23.cs" />
+    <Compile Include="Program24.cs" />
+    <Compile Include="Program25.cs" />
+    <Compile Include="Program26.cs" />
+    <Compile Include="Program27.cs" />
+    <Compile Include="Program28.cs" />
+    <Compile Include="Program29.cs" />
+    <Compile Include="Program30.cs" />
+    <Compile Include="..\..\Models\RobotArmModel.cs" Link="RobotArmModel.cs" />
+    <Compile Include="..\..\Models\AutomationItem.cs" Link="AutomationItem.cs" />
+    <Compile Include="..\..\Models\Obstacle.cs" Link="Obstacle.cs" />
+    <Compile Include="..\..\Models\AutomationPhase.cs" Link="AutomationPhase.cs" />
+    <Compile Include="..\..\Models\SceneConfig.cs" Link="SceneConfig.cs" />
+    <Compile Include="..\..\Services\AutomationController.cs" Link="AutomationController.cs" />
+    <Compile Include="..\..\Services\RadarScanner.cs" Link="RadarScanner.cs" />
+    <Compile Include="..\..\Services\CuttingController.cs" Link="CuttingController.cs" />
+    <Compile Include="..\..\Services\CutPlanner.cs" Link="CutPlanner.cs" />
+    <Compile Include="..\..\Services\JointMotion.cs" Link="JointMotion.cs" />
+    <Compile Include="..\..\Rendering\BoxSplitter.cs" Link="BoxSplitter.cs" />
+    <Compile Include="..\..\Services\TransportPathPlanner.cs" Link="TransportPathPlanner.cs" />
+    <Compile Include="..\..\Services\ObstacleLayout.cs" Link="ObstacleLayout.cs" />
+    <Compile Include="..\..\Kinematics\ForwardKinematics.cs" Link="ForwardKinematics.cs" />
+    <Compile Include="..\..\Kinematics\InverseKinematics6D.cs" Link="InverseKinematics6D.cs" />
+  </ItemGroup>
+</Project>

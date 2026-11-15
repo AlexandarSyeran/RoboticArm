@@ -1,0 +1,67 @@
+t=   0.00s MoveToPick   Automation: moving to object 1/4
+t=   2.91s CloseGripper Automation: closing gripper
+t=   3.21s Attach       Automation: attaching object
+t=   3.24s Lift         Automation: lifting
+t=  17.82s MoveToDrop   Automation: moving to drop zone
+t=  55.29s Idle         Automation: stopped (IK made no progress; residual error 0.241 (step error 0.045).)
+ABORTED in phase MoveToDrop, pathIndex=31, poses=0
+ToolOffset=-0.3256097516086031,-0.1173964526468882,-0.0007114583889694295
+routeMode=straight
+  wp[ 0] ( 3.74, 3.75,-0.35)
+  wp[ 1] ( 3.49, 3.75,-0.34)
+  wp[ 2] ( 3.25, 3.75,-0.33)
+  wp[ 3] ( 3.00, 3.75,-0.32)
+  wp[ 4] ( 2.75, 3.75,-0.31)
+  wp[ 5] ( 2.50, 3.75,-0.30)
+  wp[ 6] ( 2.25, 3.75,-0.28)
+  wp[ 7] ( 2.01, 3.75,-0.27)
+  wp[ 8] ( 1.76, 3.75,-0.26)
+  wp[ 9] ( 1.51, 3.75,-0.25)
+  wp[10] ( 1.26, 3.75,-0.24)
+  wp[11] ( 1.01, 3.75,-0.23)
+  wp[12] ( 0.77, 3.75,-0.22)
+  wp[13] ( 0.52, 3.75,-0.21)
+  wp[14] ( 0.27, 3.75,-0.20)
+  wp[15] ( 0.02, 3.75,-0.19)
+  wp[16] (-0.23, 3.75,-0.17)
+  wp[17] (-0.47, 3.75,-0.16)
+  wp[18] (-0.72, 3.75,-0.15)
+  wp[19] (-0.97, 3.75,-0.14)
+  wp[20] (-1.22, 3.75,-0.13)
+  wp[21] (-1.46, 3.75,-0.12)
+  wp[22] (-1.71, 3.75,-0.11)
+  wp[23] (-1.96, 3.75,-0.10)
+  wp[24] (-2.21, 3.75,-0.09)
+  wp[25] (-2.46, 3.75,-0.08)
+  wp[26] (-2.70, 3.75,-0.07)
+  wp[27] (-2.95, 3.75,-0.05)
+  wp[28] (-3.20, 3.75,-0.04)
+  wp[29] (-3.45, 3.75,-0.03)
+  wp[30] (-3.70, 3.75,-0.02)
+  wp[31] (-3.94, 3.75,-0.01)
+  wp[32] (-4.19, 3.75, 0.00)
+  wp[33] (-4.19, 3.50, 0.00)
+  wp[34] (-4.19, 3.25, 0.00)
+  wp[35] (-4.19, 3.00, 0.00)
+  wp[36] (-4.19, 2.75, 0.00)
+  wp[37] (-4.19, 2.50, 0.00)
+  wp[38] (-4.19, 2.25, 0.00)
+  wp[39] (-4.19, 2.00, 0.00)
+  wp[40] (-4.19, 1.75, 0.00)
+  wp[41] (-4.19, 1.50, 0.00)
+  wp[42] (-4.19, 1.25, 0.00)
+  wp[43] (-4.19, 1.00, 0.00)
+  wp[44] (-4.19, 0.75, 0.00)
+joint usage across route (deg of travel / range used):
+   base yaw: travel   898.9  range [ -180.0..  180.0]
+       elev: travel   115.1  range [    0.0..   45.0]
+   shoulder: travel   197.9  range [  -78.5..   25.4]
+      elbow: travel   179.9  range [    1.3..   90.0]
+      WRIST: travel   203.3  range [  -90.0..   20.7]
+convergence failures at waypoints: 0,30,31,32,33,34
+  wp[0] (3.74,3.75,-0.35): residual with frozen-wrist replay vs wrist-seed scan best 0.138 @ wrist 40
+  wp[30] (-3.70,3.75,-0.02): residual with frozen-wrist replay vs wrist-seed scan best 0.547 @ wrist -120
+  wp[31] (-3.94,3.75,-0.01): residual with frozen-wrist replay vs wrist-seed scan best 0.732 @ wrist -120
+  wp[32] (-4.19,3.75,0.00): residual with frozen-wrist replay vs wrist-seed scan best 0.921 @ wrist -120
+  wp[33] (-4.19,3.50,0.00): residual with frozen-wrist replay vs wrist-seed scan best 0.783 @ wrist -120
+  wp[34] (-4.19,3.25,0.00): residual with frozen-wrist replay vs wrist-seed scan best 0.659 @ wrist -120

@@ -112,6 +112,7 @@ MVVM layout: the view is a thin shell, all state and behaviour live in the view 
 - `Kinematics/ForwardKinematics.cs` - rotation, translation, and planar kinematics helpers.
 - `Kinematics/InverseKinematics6D.cs` - damped-least-squares 6D IK solver and the position-plus-tool-direction solver.
 - `RoboticArm.Tests/` - xUnit tests for kinematics, tool-pose solving, smooth motion, path planning, cutting geometry, parsing, and operation gating.
+- `_analysis/FkProbe/` - scratch console probes used to inspect kinematics and automation; `_analysis/shots/` holds screenshots captured during that analysis.
 
 ## Build
 

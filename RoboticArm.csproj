@@ -10,9 +10,13 @@
 
   <ItemGroup>
     <Compile Remove="RoboticArm.Tests/**" />
+    <Compile Remove="_analysis/**" />
     <EmbeddedResource Remove="RoboticArm.Tests/**" />
+    <EmbeddedResource Remove="_analysis/**" />
     <None Remove="RoboticArm.Tests/**" />
+    <None Remove="_analysis/**" />
     <Page Remove="RoboticArm.Tests/**" />
+    <Page Remove="_analysis/**" />
   </ItemGroup>
 
 </Project>

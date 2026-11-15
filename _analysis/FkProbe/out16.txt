@@ -1,0 +1,19 @@
+=== PLAIN RUN, NO OBSTACLES ===
+  [seed 0] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 0] t=116.82s Idle Operation finished
+  [seed 0] 4/4 finished t=116.8s status='Operation finished'
+  [seed 1] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 1] t=116.82s Idle Operation finished
+  [seed 1] 4/4 finished t=116.8s status='Operation finished'
+  [seed 2] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 2] t=116.82s Idle Operation finished
+  [seed 2] 4/4 finished t=116.8s status='Operation finished'
+  [seed 3] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 3] t=116.82s Idle Operation finished
+  [seed 3] 4/4 finished t=116.8s status='Operation finished'
+  [seed 4] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 4] t=116.82s Idle Operation finished
+  [seed 4] 4/4 finished t=116.8s status='Operation finished'
+  [seed 5] t=0.00s MoveToPick Automation: moving to object 1/4
+  [seed 5] t=116.82s Idle Operation finished
+  [seed 5] 4/4 finished t=116.8s status='Operation finished'
