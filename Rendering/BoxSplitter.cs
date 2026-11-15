@@ -119,8 +119,8 @@ namespace RoboticArm.Rendering
                         unique.Add(p);
                 }
 
-                AddCap(unique, center, normal, positive);
-                AddCap(unique, center, normal, negative);
+                AddCap(unique, center, normal, positive, flip: false);
+                AddCap(unique, center, normal, negative, flip: true);
             }
 
             return (positive, negative);
@@ -177,7 +177,8 @@ namespace RoboticArm.Rendering
                 AddTriangle(mesh, polygon[0], polygon[i], polygon[i + 1]);
         }
 
-        private static void AddCap(List<Point3D> points, Point3D center, Vector3D normal, MeshGeometry3D mesh)
+        private static void AddCap(
+            List<Point3D> points, Point3D center, Vector3D normal, MeshGeometry3D mesh, bool flip)
         {
             var centroid = new Point3D(0, 0, 0);
             foreach (var p in points)
@@ -200,8 +201,15 @@ namespace RoboticArm.Rendering
             }
 
             ordered.Sort((left, right) => key[left].CompareTo(key[right]));
-            for (int i = 0; i + 1 < ordered.Count; i++)
-                AddTriangle(mesh, centroid, ordered[i], ordered[i + 1]);
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var a = ordered[i];
+                var b = ordered[(i + 1) % ordered.Count];
+                if (flip)
+                    AddTriangle(mesh, centroid, b, a);
+                else
+                    AddTriangle(mesh, centroid, a, b);
+            }
         }
 
         private static void AddTriangle(MeshGeometry3D mesh, Point3D a, Point3D b, Point3D c)

@@ -234,22 +234,26 @@
                            Margin="0,0,0,8" />
 
                 <TextBlock Text="Joint 1 (base yaw)" />
-                <Slider Name="Joint1Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <Slider Name="Joint1Slider" Minimum="{Binding Joint1Min}" Maximum="{Binding Joint1Max}" TickFrequency="15"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding Joint1, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint1Text}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Joint 2 (base elevation)" />
-                <Slider Name="Joint2Slider" Minimum="-45" Maximum="45" TickFrequency="5"
+                <Slider Name="Joint2Slider" Minimum="{Binding Joint2Min}" Maximum="{Binding Joint2Max}" TickFrequency="5"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding Joint2, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint2Text}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Joint 3 (shoulder pitch)" />
-                <Slider Name="Joint3Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <Slider Name="Joint3Slider" Minimum="{Binding Joint3Min}" Maximum="{Binding Joint3Max}" TickFrequency="15"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding Joint3, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint3Text}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Joint 4 (elbow pitch)" />
-                <Slider Name="Joint4Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <Slider Name="Joint4Slider" Minimum="{Binding Joint4Min}" Maximum="{Binding Joint4Max}" TickFrequency="15"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding Joint4, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint4Text}" Margin="0,0,0,8" />
 
@@ -257,13 +261,13 @@
                 <Separator Margin="0,8,0,8" />
 
                 <TextBlock Text="IK (3D)" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0" IsEnabled="{Binding IsManualControlEnabled}">
                     <TextBlock Text="X:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <TextBox Width="60" Text="{Binding IkX, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock Text="Y:" VerticalAlignment="Center" Margin="8,0,4,0" />
                     <TextBox Width="60" Text="{Binding IkY, UpdateSourceTrigger=PropertyChanged}" />
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0" IsEnabled="{Binding IsManualControlEnabled}">
                     <TextBlock Text="Z:" VerticalAlignment="Center" Margin="0,0,4,0" />
                     <TextBox Width="60" Text="{Binding IkZ, UpdateSourceTrigger=PropertyChanged}" />
                     <TextBlock Text="Rx:" VerticalAlignment="Center" Margin="8,0,4,0" />
@@ -275,7 +279,8 @@
                 </StackPanel>
                 <Button Content="Solve 6D IK" Command="{Binding Solve6DCommand}" Width="120" Margin="0,8,0,0" />
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <CheckBox IsChecked="{Binding UseOrientation, Mode=TwoWay}">Use Orientation</CheckBox>
+                    <CheckBox IsChecked="{Binding UseOrientation, Mode=TwoWay}"
+                              IsEnabled="{Binding IsManualControlEnabled}">Use Orientation</CheckBox>
                 </StackPanel>
                 <Separator Margin="0,8,0,8" />
 
@@ -296,17 +301,20 @@
 
                 <TextBlock Text="Wrist Controls" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
                 <TextBlock Text="Joint 5 (wrist pitch)" />
-                <Slider Name="Joint5Slider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <Slider Name="Joint5Slider" Minimum="{Binding Joint5Min}" Maximum="{Binding Joint5Max}" TickFrequency="15"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding Joint5, Mode=TwoWay}" />
                 <TextBlock Text="{Binding Joint5Text}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Wrist Roll" />
-                <Slider Name="WristRollSlider" Minimum="-180" Maximum="180" TickFrequency="15"
+                <Slider Name="WristRollSlider" Minimum="0" Maximum="360" TickFrequency="15"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding WristRoll, Mode=TwoWay}" />
                 <TextBlock Text="{Binding WristRollText}" Margin="0,0,0,8" />
 
                 <TextBlock Text="Gripper Open" />
                 <Slider Name="GripperOpenSlider" Minimum="0" Maximum="1" TickFrequency="0.1"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding GripperOpen, Mode=TwoWay}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
@@ -319,7 +327,8 @@
                 </StackPanel>
 
                 <TextBlock Text="Tool Mode" Margin="0,6,0,0" />
-                <ComboBox Name="ToolModeCombo" SelectedIndex="{Binding ToolModeIndex, Mode=TwoWay}">
+                <ComboBox Name="ToolModeCombo" SelectedIndex="{Binding ToolModeIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding IsManualControlEnabled}">
                     <ComboBoxItem>Grip</ComboBoxItem>
                     <ComboBoxItem>Cut</ComboBoxItem>
                     <ComboBoxItem>Weld</ComboBoxItem>
@@ -339,7 +348,7 @@
                 <Separator Margin="0,8,0,8" />
 
                 <TextBlock Text="Automatic Pick and Place" FontWeight="Bold" Foreground="{StaticResource PanelHeader}" />
-                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0" IsEnabled="{Binding IsManualControlEnabled}">
                     <TextBlock Text="Arrival (s):" VerticalAlignment="Center" />
                     <TextBox Width="45" Margin="4,0,8,0"
                              Text="{Binding ArrivalDelayText, UpdateSourceTrigger=PropertyChanged}" />
@@ -349,6 +358,7 @@
                 </StackPanel>
                 <TextBlock Text="Test speed" Margin="0,4,0,0" />
                 <Slider Name="AutomationSpeedSlider" Minimum="0.01" Maximum="1.0" TickFrequency="0.01"
+                        IsEnabled="{Binding IsManualControlEnabled}"
                         Value="{Binding AutomationSpeed, Mode=TwoWay}" />
                 <TextBlock Text="{Binding AutomationSpeedText}" Margin="0,0,0,4" />
 

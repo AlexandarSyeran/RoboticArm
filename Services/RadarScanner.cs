@@ -13,7 +13,7 @@ namespace RoboticArm.Services
     // zone with their measured position and size, nearest first.
     public sealed class RadarScanner
     {
-        public const double ZoneHalfExtent = 0.9;
+        public const double ZoneHalfExtent = SceneConfig.PickupZoneHalfExtent;
 
         private readonly IReadOnlyList<AutomationItem> _items;
         private readonly Point3D _zoneCenter;
@@ -36,8 +36,8 @@ namespace RoboticArm.Services
 
                 if (Math.Abs(item.Position.X - _zoneCenter.X) > ZoneHalfExtent ||
                     Math.Abs(item.Position.Z - _zoneCenter.Z) > ZoneHalfExtent ||
-                    item.Position.Y < 0.15 ||
-                    item.Position.Y > 1.2)
+                    item.Position.Y < SceneConfig.RadarMinY ||
+                    item.Position.Y > SceneConfig.RadarMaxY)
                     continue;
 
                 found.Add(new RadarDetection(

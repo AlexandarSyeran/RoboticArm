@@ -14,19 +14,19 @@ namespace RoboticArm.Models
 
     public sealed class RobotArmModel
     {
-        public const double BaseHeight = 0.3;
+        public const double BaseHeight = SceneConfig.BaseHeight;
         public const double WristLength = 0.6;
-        public const double AutomationBaseStepPerTick = 0.045;
-        public const double PickDistance = 0.55;
+        public const double AutomationBaseStepPerTick = SceneConfig.AutomationBaseStepPerTick;
+        public const double PickDistance = SceneConfig.PickupDistance;
 
         public double L1 { get; init; } = 2.0;
         public double L2 { get; init; } = 1.5;
         public double L3 { get; init; } = 1.0;
 
-        public double[] Angles { get; } = { 0, 0, -45, 90, -90 };
+        public double[] Angles { get; } = { 5.4, 18.1, -40.6, 90.9, 40.0 };
         public double[] MinAngles { get; } = { -180, -45, -120, -150, -120 };
         public double[] MaxAngles { get; } = { 180, 45, 120, 150, 120 };
-        public double[] InitialFoldedAngles { get; } = { 0, 0, -45, 90, -90 };
+        public double[] InitialFoldedAngles { get; } = { 5.4, 18.1, -40.6, 90.9, 40.0 };
 
         public double WristRoll { get; set; }
         public double GripperOpen { get; set; } = 1.0;
@@ -178,6 +178,45 @@ namespace RoboticArm.Models
 
             Clamp();
             return solved;
+        }
+
+        // Plans a whole goal pose from the current joint state instead of the
+        // rate-limited per-tick tracking used by SolvePosition. Callers run it
+        // on a twin so the real arm only sees the planned joint goal.
+        public bool SolveGoal(Point3D targetPos, Vector3D? toolDirection, int maxIterations = 220)
+        {
+            if (toolDirection == null)
+            {
+                bool reached = Solve6D(targetPos, Matrix3D.Identity, useOrientation: false, maxIterations);
+                return reached;
+            }
+
+            bool solved = InverseKinematics6D.SolveToolPose(
+                targetPos,
+                toolDirection.Value,
+                Angles,
+                angles =>
+                {
+                    var fk = ForwardKinematics(angles);
+                    var direction = ToolOrientation(fk).Transform(new Vector3D(1, 0, 0));
+                    direction.Normalize();
+                    return (fk.EePos, direction, fk.JointOrigins, fk.JointAxes);
+                },
+                MinAngles,
+                MaxAngles,
+                0.008,
+                2.0,
+                maxIterations);
+
+            Clamp();
+            return solved;
+        }
+
+        public Vector3D ToolDirection()
+        {
+            var direction = ToolOrientation(ForwardKinematics()).Transform(new Vector3D(1, 0, 0));
+            direction.Normalize();
+            return direction;
         }
 
         public static Matrix3D EulerToRotation(double rxDegrees, double ryDegrees, double rzDegrees)

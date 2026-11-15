@@ -18,6 +18,7 @@ namespace RoboticArm.Rendering
         private Model3DGroup? _sceneGroup;
         private GeometryModel3D?[] _linkModels = Array.Empty<GeometryModel3D?>();
         private MatrixTransform3D[] _linkTransforms = Array.Empty<MatrixTransform3D>();
+        private GeometryModel3D[] _jointSpheres = Array.Empty<GeometryModel3D>();
         private GeometryModel3D? _eeSphereModel;
         private GeometryModel3D[] _gripperFingers = Array.Empty<GeometryModel3D>();
         private GeometryModel3D? _toolEffectSphere;
@@ -100,9 +101,9 @@ namespace RoboticArm.Rendering
         private void AddBase()
         {
             var baseModel = new GeometryModel3D(
-                MeshBuilder.CreateBox(1.6, 0.3, 1.6),
+                MeshBuilder.CreateBox(SceneConfig.BaseSize, SceneConfig.BaseHeight, SceneConfig.BaseSize),
                 CreateMaterial(Color.FromRgb(120, 120, 120)));
-            baseModel.Transform = new TranslateTransform3D(0, 0.15, 0);
+            baseModel.Transform = new TranslateTransform3D(0, SceneConfig.BaseHeight / 2.0, 0);
             _sceneGroup!.Children.Add(baseModel);
         }
 
@@ -111,6 +112,7 @@ namespace RoboticArm.Rendering
             int count = _vm.Robot.Angles.Length;
             _linkModels = new GeometryModel3D?[count];
             _linkTransforms = new MatrixTransform3D[count];
+            _jointSpheres = new GeometryModel3D[count];
 
             double thickness = 0.28;
             var colors = new[]
@@ -138,15 +140,16 @@ namespace RoboticArm.Rendering
                     _sceneGroup!.Children.Add(model);
                 }
 
-                _sceneGroup!.Children.Add(new GeometryModel3D(
+                _jointSpheres[i] = new GeometryModel3D(
                     MeshBuilder.CreateSphere(0.12, 12, 8),
-                    CreateMaterial(Color.FromRgb(220, 220, 220))));
+                    CreateMaterial(Color.FromRgb(220, 220, 220)));
+                _sceneGroup!.Children.Add(_jointSpheres[i]);
             }
 
             _eeSphereModel = new GeometryModel3D(
                 MeshBuilder.CreateSphere(0.14, 12, 8),
                 CreateMaterial(Color.FromRgb(255, 200, 50)));
-            _sceneGroup.Children.Add(_eeSphereModel);
+            _sceneGroup!.Children.Add(_eeSphereModel);
         }
 
         private void AddGripper()
@@ -226,26 +229,41 @@ namespace RoboticArm.Rendering
         private void AddConveyorAndZones()
         {
             var conveyor = new GeometryModel3D(
-                MeshBuilder.CreateBox(8.4, 0.12, 2.4),
+                MeshBuilder.CreateBox(
+                    SceneConfig.ConveyorLength,
+                    SceneConfig.ConveyorThickness,
+                    SceneConfig.ConveyorWidth),
                 CreateTransparentMaterial(Color.FromArgb(105, 125, 195, 220)))
             {
-                Transform = new TranslateTransform3D(0, 0.06, 0)
+                Transform = new TranslateTransform3D(0, SceneConfig.ConveyorThickness / 2.0, 0)
             };
             _sceneGroup!.Children.Add(conveyor);
 
             var pickupZone = new GeometryModel3D(
-                MeshBuilder.CreateBox(0.9, 0.025, 0.9),
+                MeshBuilder.CreateBox(
+                    SceneConfig.PickupZoneHalfExtent * 2,
+                    SceneConfig.ZoneMarkerThickness,
+                    SceneConfig.PickupZoneHalfExtent * 2),
                 CreateMaterial(Color.FromRgb(50, 125, 210)))
             {
-                Transform = new TranslateTransform3D(_vm.PickupZone.X, 0.13, _vm.PickupZone.Z)
+                Transform = new TranslateTransform3D(
+                    _vm.PickupZone.X,
+                    SceneConfig.ZoneMarkerY,
+                    _vm.PickupZone.Z)
             };
             _sceneGroup.Children.Add(pickupZone);
 
             var dropZone = new GeometryModel3D(
-                MeshBuilder.CreateBox(1.0, 0.025, 1.0),
+                MeshBuilder.CreateBox(
+                    SceneConfig.DropZoneSize,
+                    SceneConfig.ZoneMarkerThickness,
+                    SceneConfig.DropZoneSize),
                 CreateMaterial(Color.FromRgb(40, 170, 90)))
             {
-                Transform = new TranslateTransform3D(_vm.DropTarget.X, 0.13, _vm.DropTarget.Z)
+                Transform = new TranslateTransform3D(
+                    _vm.DropTarget.X,
+                    SceneConfig.ZoneMarkerY,
+                    _vm.DropTarget.Z)
             };
             _sceneGroup.Children.Add(dropZone);
         }
@@ -362,24 +380,37 @@ namespace RoboticArm.Rendering
             var robot = _vm.Robot;
             var fk = robot.ForwardKinematics();
             var eePos = fk.EePos;
-
-            Matrix3D m = Kinematics.ForwardKinematics.Translate(0, RobotArmModel.BaseHeight / 2.0, 0);
-            var localAxes = RobotArmModel.JointAxesLocal;
+            var origins = fk.JointOrigins;
 
             for (int i = 0; i < _linkTransforms.Length; i++)
             {
-                var rotation = Kinematics.ForwardKinematics.RotateAxisAngle(localAxes[i], robot.Angles[i]);
-                m = rotation * m;
+                var origin = origins[i];
+                if (i < _jointSpheres.Length)
+                    _jointSpheres[i].Transform = new TranslateTransform3D(origin.X, origin.Y, origin.Z);
 
-                double length = robot.LinkLengths[i];
-                var center = Kinematics.ForwardKinematics.Translate(length / 2.0, 0, 0) * m;
-                var align = Kinematics.ForwardKinematics.RotateAxisAngle(new Vector3D(0, 0, 1), -90);
-                _linkTransforms[i].Matrix = align * center;
+                _linkTransforms[i].Matrix = Matrix3D.Identity;
+                if (i >= _linkModels.Length || _linkModels[i] == null)
+                    continue;
 
-                m = Kinematics.ForwardKinematics.Translate(length, 0, 0) * m;
+                var end = i + 1 < origins.Length ? origins[i + 1] : eePos;
+                var delta = end - origin;
+                if (delta.Length < 1e-9)
+                    continue;
+
+                var midpoint = new Point3D(
+                    (origin.X + end.X) * 0.5,
+                    (origin.Y + end.Y) * 0.5,
+                    (origin.Z + end.Z) * 0.5);
+
+                var group = new Transform3DGroup();
+                group.Children.Add(new RotateTransform3D(
+                    new QuaternionRotation3D(RotationFromTo(new Vector3D(0, 1, 0), delta))));
+                group.Children.Add(new TranslateTransform3D(midpoint.X, midpoint.Y, midpoint.Z));
+                _linkTransforms[i].Matrix = group.Value;
             }
 
-            _eeSphereModel!.Transform = new TranslateTransform3D(eePos.X, eePos.Y, eePos.Z);
+            if (_eeSphereModel != null)
+                _eeSphereModel.Transform = new TranslateTransform3D(eePos.X, eePos.Y, eePos.Z);
 
             var wristRoll = Kinematics.ForwardKinematics.RotateAxisAngle(
                 new Vector3D(1, 0, 0), robot.WristRoll);
@@ -496,9 +527,9 @@ namespace RoboticArm.Rendering
             forward.Normalize();
 
             var tip = new Point3D(
-                fk.EePos.X + forward.X * 0.15,
-                fk.EePos.Y + forward.Y * 0.15,
-                fk.EePos.Z + forward.Z * 0.15);
+                fk.EePos.X + forward.X * SceneConfig.CutToolTipLength,
+                fk.EePos.Y + forward.Y * SceneConfig.CutToolTipLength,
+                fk.EePos.Z + forward.Z * SceneConfig.CutToolTipLength);
             var target = _vm.CutPoint;
             var delta = target - tip;
             double length = delta.Length;

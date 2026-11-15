@@ -11,13 +11,13 @@ namespace RoboticArm.Services
     // floor blocks and detours sideways around tall pillars.
     public static class TransportPathPlanner
     {
-        private const double Step = 0.14;
-        private const double EeHalf = 0.18;
-        private const double Inflate = 0.05;
-        private const double FloorClearance = 0.16;
-        private const double BaseHeight = 0.3;
-        private const double MinZ = -2.6;
-        private const double MaxZ = 2.6;
+        private const double Step = SceneConfig.PathStep;
+        private const double EeHalf = SceneConfig.EeHalfExtent;
+        private const double Inflate = SceneConfig.CollisionInflate;
+        private const double FloorClearance = SceneConfig.FloorClearance;
+        private const double BaseHeight = SceneConfig.BaseHeight;
+        private const double MinZ = -SceneConfig.WorkspaceHalfDepth;
+        private const double MaxZ = SceneConfig.WorkspaceHalfDepth;
         private const int LevelCount = 3;
 
         // Climbing or diving mid-route is slow and makes the arm pitch, so a

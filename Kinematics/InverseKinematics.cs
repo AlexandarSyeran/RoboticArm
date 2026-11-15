@@ -81,7 +81,7 @@ namespace RoboticArm.Kinematics
         }
 
         // Solve 3x3 linear system A x = b using Cramer's rule (or Gaussian elimination)
-        private static double[] Solve3x3(double[,] A, double[] b)
+        private static double[]? Solve3x3(double[,] A, double[] b)
         {
             double a11 = A[0, 0], a12 = A[0, 1], a13 = A[0, 2];
             double a21 = A[1, 0], a22 = A[1, 1], a23 = A[1, 2];

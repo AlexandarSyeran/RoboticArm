@@ -6,9 +6,12 @@ namespace RoboticArm.Models
         MoveToPick,
         CloseGripper,
         Attach,
+        PlanTransport,
         Lift,
         MoveToDrop,
+        DropAlign,
         OpenGripper,
+        ReturnClear,
         ReturnHome,
         ArrivalDelay,
         ManualPickRise,
@@ -19,6 +22,7 @@ namespace RoboticArm.Models
         ManualPlaceRise,
         ManualPlaceCarry,
         ManualPlaceDescend,
+        ManualPlaceLower,
         ManualPlaceRelease,
         ManualPlaceRetract
     }

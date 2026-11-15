@@ -8,7 +8,7 @@ namespace RoboticArm.Services
     // them like any other object on the pickup zone.
     public static class CutPlanner
     {
-        public const double CutHalfSize = 0.16;
+        public const double CutHalfSize = SceneConfig.ObjectHalfSize;
         private const double OffcutSlide = 0.16;
 
         public static (AutomationItem Keep, AutomationItem Offcut) Split(AutomationItem item, Vector3D normal)

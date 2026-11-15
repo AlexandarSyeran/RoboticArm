@@ -10,7 +10,7 @@ namespace RoboticArm.Kinematics
         // jointAxes are expressed in world coordinates
         public static bool Solve6D(Point3D targetPos, Matrix3D targetRot, double[] anglesDeg,
             Func<double[], (Point3D eePos, Matrix3D eeRot, Point3D[] jointOrigins, Vector3D[] jointAxes)> forwardKinematics,
-            double[] minAngles = null, double[] maxAngles = null,
+            double[]? minAngles = null, double[]? maxAngles = null,
             bool useOrientation = true,
             double positionTolerance = 1e-3, double orientationToleranceDeg = 1e-2,
             int maxIter = 120, double lambda = 0.1)
@@ -134,9 +134,9 @@ namespace RoboticArm.Kinematics
         // 6x6 system when orientation is intentionally not being solved.
         public static bool SolvePosition(Point3D targetPos, double[] anglesDeg,
             Func<double[], (Point3D eePos, Point3D[] jointOrigins, Vector3D[] jointAxes)> forwardKinematics,
-            double[] minAngles = null, double[] maxAngles = null,
+            double[]? minAngles = null, double[]? maxAngles = null,
             double positionTolerance = 1e-3, int maxIter = 20, double lambda = 0.12,
-            Func<double[], bool> isCandidateSafe = null)
+            Func<double[], bool>? isCandidateSafe = null)
         {
             int n = anglesDeg.Length;
             for (int iter = 0; iter < maxIter; iter++)
@@ -179,19 +179,11 @@ namespace RoboticArm.Kinematics
                     }
                 }
 
-                // Use a numerical Jacobian so the solver does not depend on
-                // the analytic axis conventions of the FK chain.
-                double[,] j = new double[3, n];
-                const double angleStep = 0.5;
-                for (int i = 0; i < n; i++)
-                {
-                    var perturbedAngles = (double[])anglesDeg.Clone();
-                    perturbedAngles[i] += angleStep;
-                    var perturbedPosition = forwardKinematics(perturbedAngles).eePos;
-                    j[0, i] = (perturbedPosition.X - fk.eePos.X) / angleStep;
-                    j[1, i] = (perturbedPosition.Y - fk.eePos.Y) / angleStep;
-                    j[2, i] = (perturbedPosition.Z - fk.eePos.Z) / angleStep;
-                }
+                // Analytic position Jacobian from the FK joint axes. The
+                // cross product is per radian; convert it to per degree so
+                // the update below can stay in degrees like the rest of the
+                // controller.
+                var j = ComputePositionJacobian(fk.eePos, fk.jointOrigins, fk.jointAxes);
 
                 double[,] jjt = new double[3, 3];
                 for (int row = 0; row < 3; row++)
@@ -282,9 +274,207 @@ namespace RoboticArm.Kinematics
             return false;
         }
 
-        // Convert rotation matrix to quaternion
-        private static Quaternion QuaternionFromMatrix(Matrix3D m)
+        // Solves position plus a tool-direction constraint. A direction has two
+        // effective degrees of freedom, so this stays feasible for the five
+        // joints where a full orientation goal would not be. Keeping the tool
+        // direction fixed is what lets a carried payload hang steadily while
+        // the arm lowers it.
+        public static bool SolveToolPose(
+            Point3D targetPos,
+            Vector3D targetDirection,
+            double[] anglesDeg,
+            Func<double[], (Point3D eePos, Vector3D toolDir, Point3D[] jointOrigins, Vector3D[] jointAxes)> forwardKinematics,
+            double[]? minAngles = null,
+            double[]? maxAngles = null,
+            double positionTolerance = 0.008,
+            double directionToleranceDeg = 2.0,
+            int maxIter = 140,
+            double lambda = 0.08,
+            double directionWeight = 0.35)
         {
+            if (targetDirection.Length < 1e-9)
+                return false;
+
+            int n = anglesDeg.Length;
+            targetDirection.Normalize();
+            double directionTolerance = directionToleranceDeg * Math.PI / 180.0;
+            const double radiansPerDegree = Math.PI / 180.0;
+
+            for (int iter = 0; iter < maxIter; iter++)
+            {
+                var fk = forwardKinematics(anglesDeg);
+                var posError = targetPos - fk.eePos;
+                double posLength = posError.Length;
+                var (directionDisplacement, directionAngle) = DirectionError(fk.toolDir, targetDirection);
+
+                if (posLength <= positionTolerance && directionAngle <= directionTolerance)
+                    return true;
+
+                // Jacobian rows are per radian: linear rows from the lever arm,
+                // direction rows from d(dir)/d(angle) = dir x axis.
+                double[,] jacobian = new double[6, n];
+                for (int i = 0; i < n; i++)
+                {
+                    var axis = fk.jointAxes[i];
+                    var lever = fk.eePos - fk.jointOrigins[i];
+                    var linear = Vector3D.CrossProduct(lever, axis);
+                    jacobian[0, i] = linear.X;
+                    jacobian[1, i] = linear.Y;
+                    jacobian[2, i] = linear.Z;
+
+                    var angular = Vector3D.CrossProduct(fk.toolDir, axis);
+                    jacobian[3, i] = angular.X * directionWeight;
+                    jacobian[4, i] = angular.Y * directionWeight;
+                    jacobian[5, i] = angular.Z * directionWeight;
+                }
+
+                double[,] jjt = new double[6, 6];
+                for (int row = 0; row < 6; row++)
+                {
+                    for (int column = row; column < 6; column++)
+                    {
+                        double sum = 0;
+                        for (int i = 0; i < n; i++)
+                            sum += jacobian[row, i] * jacobian[column, i];
+                        jjt[row, column] = sum;
+                        jjt[column, row] = sum;
+                    }
+                    jjt[row, row] += lambda * lambda;
+                }
+
+                double[] errorVector =
+                {
+                    posError.X,
+                    posError.Y,
+                    posError.Z,
+                    directionDisplacement.X * directionWeight,
+                    directionDisplacement.Y * directionWeight,
+                    directionDisplacement.Z * directionWeight
+                };
+
+                var solution = SolveLinearSystem6(jjt, errorVector);
+                if (solution == null)
+                    return false;
+
+                double[] deltaDegrees = new double[n];
+                for (int i = 0; i < n; i++)
+                {
+                    double sum = 0;
+                    for (int row = 0; row < 6; row++)
+                        sum += jacobian[row, i] * solution[row];
+                    deltaDegrees[i] = sum / radiansPerDegree;
+                }
+
+                double baseline = posLength + directionWeight * directionAngle;
+                var previousAngles = (double[])anglesDeg.Clone();
+                bool accepted = false;
+
+                for (int attempt = 0; attempt < 7; attempt++)
+                {
+                    double gain = 0.7 * Math.Pow(0.5, attempt);
+                    ApplyCandidate(anglesDeg, previousAngles, deltaDegrees, gain, minAngles, maxAngles);
+                    if (CombinedError(targetPos, targetDirection, anglesDeg, forwardKinematics, directionWeight) < baseline)
+                    {
+                        accepted = true;
+                        break;
+                    }
+                }
+
+                if (accepted)
+                    continue;
+
+                // Same coordinate-search fallback as the position solver: near
+                // an orientation singularity the combined Jacobian can stall
+                // even though one joint still improves the combined error.
+                Array.Copy(previousAngles, anglesDeg, n);
+                int bestJoint = -1;
+                double bestChange = 0;
+                double bestError = baseline;
+                double[] fallbackSteps = { 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0 };
+
+                for (int joint = 0; joint < n; joint++)
+                {
+                    foreach (var step in fallbackSteps)
+                    {
+                        foreach (var direction in new[] { -1.0, 1.0 })
+                        {
+                            Array.Copy(previousAngles, anglesDeg, n);
+                            anglesDeg[joint] = ClampJoint(previousAngles[joint] + direction * step, joint, minAngles, maxAngles);
+                            double candidate = CombinedError(targetPos, targetDirection, anglesDeg, forwardKinematics, directionWeight);
+                            if (candidate < bestError - 1e-6)
+                            {
+                                bestError = candidate;
+                                bestJoint = joint;
+                                bestChange = direction * step;
+                            }
+                        }
+                    }
+                }
+
+                Array.Copy(previousAngles, anglesDeg, n);
+                if (bestJoint < 0)
+                    return false;
+
+                anglesDeg[bestJoint] = ClampJoint(previousAngles[bestJoint] + bestChange, bestJoint, minAngles, maxAngles);
+            }
+
+            return false;
+        }
+
+        private static void ApplyCandidate(double[] anglesDeg, double[] previousAngles, double[] deltaDegrees, double gain, double[]? minAngles, double[]? maxAngles)
+        {
+            for (int i = 0; i < anglesDeg.Length; i++)
+            {
+                double step = Math.Clamp(deltaDegrees[i] * gain, -6.0, 6.0);
+                anglesDeg[i] = ClampJoint(previousAngles[i] + step, i, minAngles, maxAngles);
+            }
+        }
+
+        private static double CombinedError(
+            Point3D targetPos,
+            Vector3D targetDirection,
+            double[] anglesDeg,
+            Func<double[], (Point3D eePos, Vector3D toolDir, Point3D[] jointOrigins, Vector3D[] jointAxes)> forwardKinematics,
+            double directionWeight)
+        {
+            var fk = forwardKinematics(anglesDeg);
+            var (_, directionAngle) = DirectionError(fk.toolDir, targetDirection);
+            return (targetPos - fk.eePos).Length + directionWeight * directionAngle;
+        }
+
+        // The direction lives on the unit sphere, so its error must be the
+        // tangent displacement (target - current), not the rotation vector
+        // that produced it. The Jacobian rows are tangent, and feeding them
+        // the rotation vector leaves the solver blind.
+        private static (Vector3D Displacement, double Angle) DirectionError(Vector3D current, Vector3D target)
+        {
+            current.Normalize();
+            double dot = Math.Clamp(Vector3D.DotProduct(current, target), -1.0, 1.0);
+            double angle = Math.Acos(dot);
+            return (target - current, angle);
+        }
+
+        public static double[,] ComputePositionJacobian(
+            Point3D eePos, Point3D[] jointOrigins, Vector3D[] jointAxes)
+        {
+            int n = jointOrigins.Length;
+            var jacobian = new double[3, n];
+            const double radiansPerDegree = Math.PI / 180.0;
+
+            for (int i = 0; i < n; i++)
+            {
+                var r = eePos - jointOrigins[i];
+                var lin = Vector3D.CrossProduct(r, jointAxes[i]);
+                jacobian[0, i] = lin.X * radiansPerDegree;
+                jacobian[1, i] = lin.Y * radiansPerDegree;
+                jacobian[2, i] = lin.Z * radiansPerDegree;
+            }
+
+            return jacobian;
+        }
+
+        // Convert rotation matrix to quaternion
+        private static Quaternion QuaternionFromMatrix(Matrix3D m)        {
             // Convert rotation matrix to quaternion (assuming no scaling)
             double trace = m.M11 + m.M22 + m.M33;
             double w, x, y, z;
@@ -338,7 +528,7 @@ namespace RoboticArm.Kinematics
         // The base yaw limits span a full turn, so they form a seam rather
         // than a stop: wrapping lets the joint pass through +/-180 instead of
         // jamming against the limit when the target lies just across it.
-        private static double ClampJoint(double value, int joint, double[] minAngles, double[] maxAngles)
+        private static double ClampJoint(double value, int joint, double[]? minAngles, double[]? maxAngles)
         {
             if (minAngles == null || maxAngles == null)
                 return value;
@@ -350,7 +540,7 @@ namespace RoboticArm.Kinematics
         }
 
         // Solve 6x6 linear system A x = b using Gaussian elimination (simple)
-        private static double[] SolveLinearSystem6(double[,] A, double[] b)
+        private static double[]? SolveLinearSystem6(double[,] A, double[] b)
         {
             int n = 6;
             double[,] M = new double[n, n + 1];
@@ -381,7 +571,7 @@ namespace RoboticArm.Kinematics
             return x;
         }
 
-        private static double[] SolveLinearSystem3(double[,] A, double[] b)
+        private static double[]? SolveLinearSystem3(double[,] A, double[] b)
         {
             double[,] m = new double[3, 4];
             for (int row = 0; row < 3; row++)

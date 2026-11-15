@@ -8,4 +8,11 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="RoboticArm.Tests/**" />
+    <EmbeddedResource Remove="RoboticArm.Tests/**" />
+    <None Remove="RoboticArm.Tests/**" />
+    <Page Remove="RoboticArm.Tests/**" />
+  </ItemGroup>
+
 </Project>

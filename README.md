@@ -7,13 +7,15 @@ A 3D robotic-arm simulator built with C# and WPF on .NET 10. The application use
 - Procedural 3D robot scene with base, links, joints, wrist, gripper, conveyor, pickup zone, and drop zone.
 - Five joints: base yaw, base elevation (`±45°`, lifts the whole arm), shoulder pitch, elbow pitch, and wrist pitch.
 - Hierarchical forward kinematics (FK).
-- 3D damped-least-squares inverse kinematics with position and optional orientation solving.
+- 3D damped-least-squares inverse kinematics with position and optional orientation solving, plus a tool-pose solver that reaches a position while holding the tool direction.
+- Joint-space motion with speed and acceleration limits, shared by every automated phase, so the arm starts and stops smoothly from any pose without jerking the payload.
 - Configurable joint limits, including full base yaw from `-180°` to `+180°`.
 - Four-finger gripper with open/close control and wrist roll.
-- Wrist orientation axes and grip, cut, weld tool visualizations, and an animated laser cutting workflow.
+- Wrist orientation axes and grip, cut, weld tool visualizations, and an animated laser cutting workflow that sweeps the beam across each object.
 - Guided manual pick and place: the arm travels to an available object, grasps it, and later carries it to the drop zone.
 - Automatic multi-object pick-and-place workflow.
 - Grid-based transport path planner that routes the carried object over, under, and around obstacles.
+- Transport routes are planned on a background thread, so the window stays responsive while the arm computes a path.
 - Transparent blue plexiglass-style conveyor surface.
 - Built-in pickup-zone radar: the automation scans the zone and picks the nearest detected object; a bottom-left panel lists every detection with its dimensions and coordinates.
 - Mouse-controlled camera orbit, zoom, and viewport interaction.
@@ -57,15 +59,18 @@ Enter target position and optional orientation values in the **IK (3D)** section
 
 ### Automatic pick and place
 
-Use **Start operation** to process the conveyor objects. Use **Stop Auto** to stop the workflow and **Reset Auto Objects** to restore the initial scene and object positions. Objects are arranged in the drop zone like a pallet: a 2x2 grid, four objects per level, with the next four stacked on top, so they never land inside each other; the arrangement uses the internal drop scan and applies to both **Start operation** and manual **Place Object**. When the radar scan comes back empty, the run ends and a green message in the top-right corner reports that the transport operation finished; **Reset Auto Objects** clears it and restores the scene. The command panel uses the same dark palette as the radar readout.
+Use **Start operation** to process the conveyor objects. Use **Stop Auto** to stop the workflow and **Reset Auto Objects** to restore the initial scene and object positions. Objects are arranged in the drop zone like a pallet: a 2x2 grid, four objects per level, with the next four stacked on top, so they never land inside each other; the arrangement uses the internal drop scan and applies to both **Start operation** and manual **Place Object**. Between the zones the arm swings on an arc around its base instead of crossing over it, so it stays extended instead of folding its links into each other, and each slot is approached from straight above the stack top with the payload centred over the slot before it is lowered. The lowering pose is planned once with the tool direction the arm already holds, and all joints - including the base elevation, shoulder, elbow, and wrist - follow that single goal through one acceleration-limited motion law, so the payload does not tremble or change orientation on the way down. After the gripper opens, the object settles into the slot in a short smoothstep drop, and the arm climbs back to the same clearance height, so neither the carried object nor the gripper sweeps through a neighbouring piece. The workflow starts from whatever pose the arm currently holds and falls back to the folded pose when a goal needs a different seed. When the radar scan comes back empty, the run ends and a green message in the top-right corner reports that the transport operation finished; **Reset Auto Objects** clears it and restores the scene. The command panel uses the same dark palette as the radar readout.
 
 ### Laser cutting
 
-Select **Cut** in the **Tool Mode** list and press **Activate Tool**. The arm visits the four objects on the pickup zone one by one, hovers above each one, lowers the tool, and burns a laser cut:
+Select **Cut** in the **Tool Mode** list and press **Activate Tool**. The arm visits the four objects on the pickup zone one by one, and each cut is a real stroke:
 
-- a visible beam runs from the tool tip to the object while sparks mark the impact point;
-- the cut plane follows the tool direction at that moment, so each object is split at the angle the arm actually holds;
-- the two halves separate and stay in the scene as the physical result of the cut.
+- the arm first moves above the entry side of the object, then lowers the tool onto the cut line;
+- it sweeps the beam across the object along a horizontal cut line, keeping the tool direction it held when it entered the cut, while sparks mark the impact point;
+- the beam is on only during the sweep, and the cut plane is the held tool direction, so each object is split at the angle the arm actually cut it;
+- after the stroke the arm retracts upward before travelling to the next object, and the two halves separate and stay in the scene as the physical result of the cut.
+
+Every goal is solved for the tool position and direction, so the wrist and base elevation take part in the stroke instead of the arm working position-only. The whole run uses the same acceleration-limited joint motion as the transport workflow, and it starts from the current pose with a folded-pose fallback.
 
 When all four objects are cut the workflow stops and a green message appears in the top-right corner. The application then waits: **Reset Auto Objects** restores the objects and the pose, and **Activate Tool** starts a new cutting cycle. **Start operation** and the manual pick/place buttons also stop the cutting workflow first.
 
@@ -88,11 +93,15 @@ MVVM layout: the view is a thin shell, all state and behaviour live in the view 
 - `ViewModels/MainViewModel.cs` - joint state, commands, timers, IK targets, object status, and automation wiring.
 - `Models/RobotArmModel.cs` - robot state, FK, IK entry points, joint limits, and poses.
 - `Models/AutomationItem.cs`, `Models/Obstacle.cs`, `Models/Keyframe.cs`, `Models/ToolMode.cs`, `Models/AutomationPhase.cs` - scene and workflow models.
+- `Models/SceneConfig.cs` - shared scene dimensions and path-planning constants.
 - `Services/AutomationController.cs` - automatic pick-and-place state machine and transport path.
 - `Services/RadarScanner.cs` - pickup-zone scan that feeds the automation with sizes and positions.
-- `Services/CuttingController.cs` - laser cutting workflow (approach, cut, retract per object).
+- `Services/CuttingController.cs` - laser cutting workflow (hover, descend, horizontal sweep, retract per object).
+- `Services/JointMotion.cs` - shared speed- and acceleration-limited joint motion used by the automated phases.
 - `Services/CutPlanner.cs` - turns a cut object into two transportable pieces.
 - `Services/TransportPathPlanner.cs` - layered grid route search for obstacle avoidance.
+- `Services/OperationCoordinator.cs` - keeps robot operations mutually exclusive.
+- `Services/NumericInput.cs` - invariant-culture numeric parsing and formatting.
 - `Services/KeyframePlayer.cs` - keyframe recording and Hermite trajectory playback.
 - `Services/IDialogService.cs`, `Services/WpfDialogService.cs` - dialog abstraction and WPF implementation.
 - `Mvvm/ObservableObject.cs`, `Mvvm/RelayCommand.cs` - `INotifyPropertyChanged` base and `ICommand`.
@@ -101,10 +110,13 @@ MVVM layout: the view is a thin shell, all state and behaviour live in the view 
 - `Rendering/BoxSplitter.cs` - splits an object mesh along the cutting plane.
 - `Views/CameraController.cs` - orbit and zoom camera.
 - `Kinematics/ForwardKinematics.cs` - rotation, translation, and planar kinematics helpers.
-- `Kinematics/InverseKinematics6D.cs` - damped-least-squares 6D IK solver.
+- `Kinematics/InverseKinematics6D.cs` - damped-least-squares 6D IK solver and the position-plus-tool-direction solver.
+- `RoboticArm.Tests/` - xUnit tests for kinematics, tool-pose solving, smooth motion, path planning, cutting geometry, parsing, and operation gating.
 
 ## Build
 
 The project targets `net10.0-windows` and uses nullable reference types and implicit usings. Build it from Visual Studio with **Build > Build Solution**.
+
+Run the tests from the repository root with `dotnet test RoboticArm.Tests/RoboticArm.Tests.csproj`.
 
 Visual Studio, .NET build output, and local publish files are excluded through `.gitignore`.

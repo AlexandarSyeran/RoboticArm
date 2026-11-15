@@ -11,12 +11,14 @@ namespace RoboticArm.ViewModels
 {
     public sealed class MainViewModel : ObservableObject, IDisposable
     {
-        private const double TimerMilliseconds = 30.0;
+        private const double TimerMilliseconds = SceneConfig.TimerMilliseconds;
 
         private readonly IDialogService _dialogs;
         private readonly AutomationController _automation;
         private readonly CuttingController _cutting;
         private readonly RadarScanner _radar;
+        private readonly OperationCoordinator _operations = new();
+        private readonly List<RelayCommand> _commands = new();
         private readonly KeyframePlayer _keyframes = new();
         private readonly List<AutomationItem> _items = new();
         private readonly List<Obstacle> _obstacles = new();
@@ -32,7 +34,7 @@ namespace RoboticArm.ViewModels
         private bool _obstacleTestActive;
         private double _obstacleTestKeyframeTime;
 
-        private double _automationSpeed = 0.55;
+        private double _automationSpeed = SceneConfig.DefaultSpeedMultiplier;
         private string _arrivalDelayText = "2";
         private string _actionDelayText = "0.7";
         private string _ikX = "2.5";
@@ -62,7 +64,7 @@ namespace RoboticArm.ViewModels
 
             var folded = Robot.ForwardKinematics();
             HomePosition = folded.EePos;
-            PickupZone = new Point3D(folded.EePos.X, 0.30, 0);
+            PickupZone = new Point3D(folded.EePos.X, SceneConfig.PickupZoneSurfaceY, 0);
             DropTarget = new Point3D(-PickupZone.X, PickupZone.Y, PickupZone.Z);
 
             _automation = new AutomationController(
@@ -85,29 +87,40 @@ namespace RoboticArm.ViewModels
             _trajectoryTimer = CreateTimer(TrajectoryTick);
             _cutTimer = CreateTimer(CuttingTick);
 
-            ResetCommand = new RelayCommand(ResetJoints);
-            Solve6DCommand = new RelayCommand(Solve6D);
-            RecordKeyframeCommand = new RelayCommand(RecordKeyframe);
-            ClearKeyframesCommand = new RelayCommand(ClearKeyframes);
-            ExportKeyframesCommand = new RelayCommand(ExportKeyframes);
-            ImportKeyframesCommand = new RelayCommand(ImportKeyframes);
-            PlayTrajectoryCommand = new RelayCommand(PlayTrajectory);
-            StopTrajectoryCommand = new RelayCommand(StopTrajectory);
-            OpenGripperCommand = new RelayCommand(() => GripperOpen = 1.0);
-            CloseGripperCommand = new RelayCommand(CloseGripper);
-            StartWristRotateCommand = new RelayCommand(() => _wristTimer.Start());
-            StopWristRotateCommand = new RelayCommand(() => _wristTimer.Stop());
-            ActivateToolCommand = new RelayCommand(OnActivateTool);
-            PlaceObjectCommand = new RelayCommand(StartManualPlace);
-            PickObjectCommand = new RelayCommand(StartManualPick);
-            ReleaseObjectCommand = new RelayCommand(ReleaseObject);
-            StartAutomationCommand = new RelayCommand(StartAutomation);
-            StopAutomationCommand = new RelayCommand(StopAutomation);
-            ResetAutomationCommand = new RelayCommand(ResetAutomationObjects);
-            TestObstacleAvoidanceCommand = new RelayCommand(TestObstacleAvoidance);
-            PlayWaveCommand = new RelayCommand(PlayWave);
-            StopWaveCommand = new RelayCommand(() => _waveTimer.Stop());
+            ResetCommand = Command(ResetJoints, () => IsIdle);
+            Solve6DCommand = Command(Solve6D, () => IsIdle);
+            RecordKeyframeCommand = Command(RecordKeyframe, () => IsIdle);
+            ClearKeyframesCommand = Command(ClearKeyframes, () => IsIdle);
+            ExportKeyframesCommand = Command(ExportKeyframes);
+            ImportKeyframesCommand = Command(ImportKeyframes, () => IsIdle);
+            PlayTrajectoryCommand = Command(
+                PlayTrajectory,
+                () => IsIdle && _keyframes.Keyframes.Count >= 2);
+            StopTrajectoryCommand = Command(
+                StopTrajectory,
+                () => _operations.Is(RobotOperation.Trajectory));
+            OpenGripperCommand = Command(() => GripperOpen = 1.0, () => IsIdle);
+            CloseGripperCommand = Command(CloseGripper, () => IsIdle);
+            StartWristRotateCommand = Command(StartWristRotate, () => IsIdle);
+            StopWristRotateCommand = Command(
+                StopWristRotate,
+                () => _operations.Is(RobotOperation.WristRotate));
+            ActivateToolCommand = Command(
+                OnActivateTool,
+                () => IsIdle || _operations.Is(RobotOperation.Cutting));
+            PlaceObjectCommand = Command(StartManualPlace, () => IsIdle);
+            PickObjectCommand = Command(StartManualPick, () => IsIdle);
+            ReleaseObjectCommand = Command(ReleaseObject, () => IsIdle);
+            StartAutomationCommand = Command(StartAutomation, () => IsIdle);
+            StopAutomationCommand = Command(
+                StopAutomation,
+                () => _operations.Is(RobotOperation.Automation));
+            ResetAutomationCommand = Command(ResetAutomationObjects);
+            TestObstacleAvoidanceCommand = Command(TestObstacleAvoidance, () => IsIdle);
+            PlayWaveCommand = Command(PlayWave, () => IsIdle);
+            StopWaveCommand = Command(StopWave, () => _operations.Is(RobotOperation.Wave));
 
+            _operations.Changed += UpdateCommandStates;
             ResetAutomationObjects();
         }
 
@@ -120,6 +133,8 @@ namespace RoboticArm.ViewModels
 
         public ToolMode ToolMode => (ToolMode)ToolModeIndex;
         public bool IsAutomationRunning => _automation.IsRunning;
+        public bool IsManualControlEnabled => _operations.IsIdle;
+        private bool IsIdle => _operations.IsIdle;
 
         public event Action? PoseChanged;
         public event Action? AutomationSceneChanged;
@@ -161,6 +176,17 @@ namespace RoboticArm.ViewModels
         public string Joint3Text => FormatAngle(Joint3);
         public string Joint4Text => FormatAngle(Joint4);
         public string Joint5Text => FormatAngle(Joint5);
+
+        public double Joint1Min => Robot.MinAngles[0];
+        public double Joint1Max => Robot.MaxAngles[0];
+        public double Joint2Min => Robot.MinAngles[1];
+        public double Joint2Max => Robot.MaxAngles[1];
+        public double Joint3Min => Robot.MinAngles[2];
+        public double Joint3Max => Robot.MaxAngles[2];
+        public double Joint4Min => Robot.MinAngles[3];
+        public double Joint4Max => Robot.MaxAngles[3];
+        public double Joint5Min => Robot.MinAngles[4];
+        public double Joint5Max => Robot.MaxAngles[4];
 
         public double WristRoll
         {
@@ -337,34 +363,34 @@ namespace RoboticArm.ViewModels
             private set => SetProperty(ref _radarReadout, value);
         }
 
-        public ICommand ResetCommand { get; }
-        public ICommand Solve6DCommand { get; }
-        public ICommand RecordKeyframeCommand { get; }
-        public ICommand ClearKeyframesCommand { get; }
-        public ICommand ExportKeyframesCommand { get; }
-        public ICommand ImportKeyframesCommand { get; }
-        public ICommand PlayTrajectoryCommand { get; }
-        public ICommand StopTrajectoryCommand { get; }
-        public ICommand OpenGripperCommand { get; }
-        public ICommand CloseGripperCommand { get; }
-        public ICommand StartWristRotateCommand { get; }
-        public ICommand StopWristRotateCommand { get; }
-        public ICommand ActivateToolCommand { get; }
-        public ICommand PlaceObjectCommand { get; }
-        public ICommand PickObjectCommand { get; }
-        public ICommand ReleaseObjectCommand { get; }
-        public ICommand StartAutomationCommand { get; }
-        public ICommand StopAutomationCommand { get; }
-        public ICommand ResetAutomationCommand { get; }
-        public ICommand TestObstacleAvoidanceCommand { get; }
-        public ICommand PlayWaveCommand { get; }
-        public ICommand StopWaveCommand { get; }
+        public RelayCommand ResetCommand { get; }
+        public RelayCommand Solve6DCommand { get; }
+        public RelayCommand RecordKeyframeCommand { get; }
+        public RelayCommand ClearKeyframesCommand { get; }
+        public RelayCommand ExportKeyframesCommand { get; }
+        public RelayCommand ImportKeyframesCommand { get; }
+        public RelayCommand PlayTrajectoryCommand { get; }
+        public RelayCommand StopTrajectoryCommand { get; }
+        public RelayCommand OpenGripperCommand { get; }
+        public RelayCommand CloseGripperCommand { get; }
+        public RelayCommand StartWristRotateCommand { get; }
+        public RelayCommand StopWristRotateCommand { get; }
+        public RelayCommand ActivateToolCommand { get; }
+        public RelayCommand PlaceObjectCommand { get; }
+        public RelayCommand PickObjectCommand { get; }
+        public RelayCommand ReleaseObjectCommand { get; }
+        public RelayCommand StartAutomationCommand { get; }
+        public RelayCommand StopAutomationCommand { get; }
+        public RelayCommand ResetAutomationCommand { get; }
+        public RelayCommand TestObstacleAvoidanceCommand { get; }
+        public RelayCommand PlayWaveCommand { get; }
+        public RelayCommand StopWaveCommand { get; }
 
         public void SetIkTarget(Point3D point, bool solveLive)
         {
-            IkX = point.X.ToString("F2");
-            IkY = point.Y.ToString("F2");
-            IkZ = point.Z.ToString("F2");
+            IkX = NumericInput.Format(point.X);
+            IkY = NumericInput.Format(point.Y);
+            IkZ = NumericInput.Format(point.Z);
 
             if (solveLive)
                 Solve6DLive(point);
@@ -377,6 +403,22 @@ namespace RoboticArm.ViewModels
             _wristTimer.Stop();
             _trajectoryTimer.Stop();
             _cutTimer.Stop();
+            _operations.StopAll();
+        }
+
+        private RelayCommand Command(Action execute, Func<bool>? canExecute = null)
+        {
+            var command = new RelayCommand(execute, canExecute);
+            _commands.Add(command);
+            return command;
+        }
+
+        private void UpdateCommandStates()
+        {
+            foreach (var command in _commands)
+                command.RaiseCanExecuteChanged();
+
+            OnPropertyChanged(nameof(IsManualControlEnabled));
         }
 
         private static DispatcherTimer CreateTimer(Action tick)
@@ -390,6 +432,7 @@ namespace RoboticArm.ViewModels
 
         private void SetJoint(int index, double value)
         {
+            value = Math.Clamp(value, Robot.MinAngles[index], Robot.MaxAngles[index]);
             if (Math.Abs(Robot.Angles[index] - value) < 1e-9)
                 return;
 
@@ -473,9 +516,9 @@ namespace RoboticArm.ViewModels
 
         private void Solve6DLive(Point3D point)
         {
-            double.TryParse(IkRx, out double rx);
-            double.TryParse(IkRy, out double ry);
-            double.TryParse(IkRz, out double rz);
+            NumericInput.TryParse(IkRx, out double rx);
+            NumericInput.TryParse(IkRy, out double ry);
+            NumericInput.TryParse(IkRz, out double rz);
 
             var rotation = RobotArmModel.EulerToRotation(rx, ry, rz);
             Robot.Solve6D(point, rotation, UseOrientation, 10);
@@ -487,37 +530,37 @@ namespace RoboticArm.ViewModels
             position = default;
             rotation = Matrix3D.Identity;
 
-            if (!double.TryParse(IkX, out double x))
+            if (!NumericInput.TryParse(IkX, out double x))
             {
                 _dialogs.ShowMessage("Invalid X");
                 return false;
             }
 
-            if (!double.TryParse(IkY, out double y))
+            if (!NumericInput.TryParse(IkY, out double y))
             {
                 _dialogs.ShowMessage("Invalid Y");
                 return false;
             }
 
-            if (!double.TryParse(IkZ, out double z))
+            if (!NumericInput.TryParse(IkZ, out double z))
             {
                 _dialogs.ShowMessage("Invalid Z");
                 return false;
             }
 
-            if (!double.TryParse(IkRx, out double rx))
+            if (!NumericInput.TryParse(IkRx, out double rx))
             {
                 _dialogs.ShowMessage("Invalid Rx");
                 return false;
             }
 
-            if (!double.TryParse(IkRy, out double ry))
+            if (!NumericInput.TryParse(IkRy, out double ry))
             {
                 _dialogs.ShowMessage("Invalid Ry");
                 return false;
             }
 
-            if (!double.TryParse(IkRz, out double rz))
+            if (!NumericInput.TryParse(IkRz, out double rz))
             {
                 _dialogs.ShowMessage("Invalid Rz");
                 return false;
@@ -531,6 +574,7 @@ namespace RoboticArm.ViewModels
         private void RecordKeyframe()
         {
             _keyframes.Record(Robot.Angles);
+            UpdateCommandStates();
             var last = _keyframes.Keyframes[^1];
             _dialogs.ShowMessage($"Recorded keyframe #{_keyframes.Keyframes.Count} at t={last.Time:F2}s");
         }
@@ -538,13 +582,18 @@ namespace RoboticArm.ViewModels
         private void ClearKeyframes()
         {
             _keyframes.Keyframes.Clear();
+            UpdateCommandStates();
             _dialogs.ShowMessage("Keyframes cleared");
         }
 
         private void PlayTrajectory()
         {
+            if (!_operations.TryBegin(RobotOperation.Trajectory))
+                return;
+
             if (!_keyframes.Play())
             {
+                _operations.End(RobotOperation.Trajectory);
                 _dialogs.ShowMessage("Need at least 2 keyframes to play.");
                 return;
             }
@@ -556,6 +605,7 @@ namespace RoboticArm.ViewModels
         {
             _keyframes.Stop();
             _trajectoryTimer.Stop();
+            _operations.End(RobotOperation.Trajectory);
         }
 
         private void ExportKeyframes()
@@ -595,6 +645,7 @@ namespace RoboticArm.ViewModels
                 if (imported != null)
                 {
                     _keyframes.Replace(imported);
+                    UpdateCommandStates();
                     _dialogs.ShowMessage($"Imported {_keyframes.Keyframes.Count} keyframes.");
                 }
             }
@@ -623,6 +674,12 @@ namespace RoboticArm.ViewModels
             if (!_automation.StartManualPick())
                 return;
 
+            if (!_operations.TryBegin(RobotOperation.Automation))
+            {
+                _automation.Stop("Automation stopped.");
+                return;
+            }
+
             ObjectStatus = "Object: picking";
             _automationTimer.Start();
         }
@@ -639,6 +696,12 @@ namespace RoboticArm.ViewModels
 
             if (!_automation.StartManualPlace())
                 return;
+
+            if (!_operations.TryBegin(RobotOperation.Automation))
+            {
+                _automation.Stop("Automation stopped.");
+                return;
+            }
 
             ObjectStatus = "Object: placing";
             _automationTimer.Start();
@@ -706,27 +769,46 @@ namespace RoboticArm.ViewModels
             _automation.ActionDelay = ParseDelay(ActionDelayText, 0.7);
             _automation.SpeedMultiplier = AutomationSpeed;
 
-            if (_automation.Start())
-                _automationTimer.Start();
+            if (!_automation.Start())
+                return;
+
+            if (!_operations.TryBegin(RobotOperation.Automation))
+            {
+                _automation.Stop("Automation stopped.");
+                return;
+            }
+
+            _automationTimer.Start();
         }
 
         private void StopAutomation()
         {
             _automationTimer.Stop();
             _automation.Stop("Automation stopped.");
+            _operations.End(RobotOperation.Automation);
+            EndObstacleTest();
+        }
 
-            if (_obstacleTestActive)
-            {
-                _obstacleTestActive = false;
-                _obstacles.Clear();
-                AutomationSceneChanged?.Invoke();
-            }
+        private void EndObstacleTest()
+        {
+            if (!_obstacleTestActive)
+                return;
+
+            _obstacleTestActive = false;
+            _obstacles.Clear();
+            AutomationSceneChanged?.Invoke();
         }
 
         private void OnActivateTool()
         {
             var mode = (ToolMode)ToolModeIndex;
             ToolActivated?.Invoke(mode);
+
+            if (mode == ToolMode.Cut && _cutting.IsRunning)
+            {
+                StopCutting("stopped by user");
+                return;
+            }
 
             if (mode != ToolMode.Cut)
             {
@@ -758,6 +840,12 @@ namespace RoboticArm.ViewModels
             if (!_cutting.Start())
                 return;
 
+            if (!_operations.TryBegin(RobotOperation.Cutting))
+            {
+                _cutting.Stop("operation conflict");
+                return;
+            }
+
             ObjectStatus = "Object: cutting";
             _cutTimer.Start();
         }
@@ -769,6 +857,7 @@ namespace RoboticArm.ViewModels
             if (_cutting.IsRunning)
                 _cutting.Stop(reason);
 
+            _operations.End(RobotOperation.Cutting);
             OnPropertyChanged(nameof(IsCutting));
             OnPropertyChanged(nameof(IsCutBeamOn));
         }
@@ -795,10 +884,11 @@ namespace RoboticArm.ViewModels
         private void OnCuttingFinished()
         {
             _cutTimer.Stop();
+            _operations.End(RobotOperation.Cutting);
             OnPropertyChanged(nameof(IsCutting));
             OnPropertyChanged(nameof(IsCutBeamOn));
 
-            if (_cutting.ObjectsCut >= _items.Count)
+            if (_cutting.ObjectsCut >= _cutting.TargetCount)
             {
                 _cutCompleted = true;
                 ShowToast("Cutting operation finished. Press Reset Auto Objects to repeat.");
@@ -829,9 +919,15 @@ namespace RoboticArm.ViewModels
         private void ResetAutomationObjects()
         {
             _automationTimer.Stop();
-            _automation.Stop("Automation stopped.");
-
+            _waveTimer.Stop();
+            _wristTimer.Stop();
+            _trajectoryTimer.Stop();
             _cutTimer.Stop();
+            _keyframes.Stop();
+            _operations.StopAll();
+
+            StopAutomation();
+
             _cutting.ResetState();
             _cutCompleted = false;
             HideToast();
@@ -839,10 +935,10 @@ namespace RoboticArm.ViewModels
             _items.Clear();
             var positions = new[]
             {
-                new Point3D(PickupZone.X - 0.45, 0.46, PickupZone.Z - 0.35),
-                new Point3D(PickupZone.X + 0.45, 0.46, PickupZone.Z - 0.35),
-                new Point3D(PickupZone.X - 0.45, 0.46, PickupZone.Z + 0.35),
-                new Point3D(PickupZone.X + 0.45, 0.46, PickupZone.Z + 0.35)
+                new Point3D(PickupZone.X - SceneConfig.PickupObjectOffsetX, SceneConfig.PickupObjectY, PickupZone.Z - SceneConfig.PickupObjectOffsetZ),
+                new Point3D(PickupZone.X + SceneConfig.PickupObjectOffsetX, SceneConfig.PickupObjectY, PickupZone.Z - SceneConfig.PickupObjectOffsetZ),
+                new Point3D(PickupZone.X - SceneConfig.PickupObjectOffsetX, SceneConfig.PickupObjectY, PickupZone.Z + SceneConfig.PickupObjectOffsetZ),
+                new Point3D(PickupZone.X + SceneConfig.PickupObjectOffsetX, SceneConfig.PickupObjectY, PickupZone.Z + SceneConfig.PickupObjectOffsetZ)
             };
 
             for (int i = 0; i < positions.Length; i++)
@@ -905,6 +1001,8 @@ namespace RoboticArm.ViewModels
             AutomationStatus = $"Obstacle test {_obstacleTestNumber}: starting";
 
             StartAutomation();
+            if (!_automation.IsRunning)
+                EndObstacleTest();
         }
 
         private void GenerateObstacleLayout()
@@ -916,8 +1014,17 @@ namespace RoboticArm.ViewModels
 
         private void PlayWave()
         {
+            if (!_operations.TryBegin(RobotOperation.Wave))
+                return;
+
             _waveTime = 0;
             _waveTimer.Start();
+        }
+
+        private void StopWave()
+        {
+            _waveTimer.Stop();
+            _operations.End(RobotOperation.Wave);
         }
 
         private void AutomationTick()
@@ -948,11 +1055,26 @@ namespace RoboticArm.ViewModels
             SyncJointsFromModel();
         }
 
+        private void StartWristRotate()
+        {
+            if (!_operations.TryBegin(RobotOperation.WristRotate))
+                return;
+
+            _wristTimer.Start();
+        }
+
+        private void StopWristRotate()
+        {
+            _wristTimer.Stop();
+            _operations.End(RobotOperation.WristRotate);
+        }
+
         private void WristRotateTick()
         {
             double angle = Robot.WristRoll + 2.5;
-            if (angle >= 360)
-                angle -= 360;
+            angle %= 360;
+            if (angle < 0)
+                angle += 360;
 
             WristRoll = angle;
         }
@@ -962,6 +1084,7 @@ namespace RoboticArm.ViewModels
             if (!_keyframes.Tick(TimerMilliseconds / 1000.0, Robot.Angles))
             {
                 _trajectoryTimer.Stop();
+                _operations.End(RobotOperation.Trajectory);
                 SyncJointsFromModel();
                 return;
             }
@@ -978,19 +1101,11 @@ namespace RoboticArm.ViewModels
         private void OnAutomationFinished()
         {
             _automationTimer.Stop();
+            _operations.End(RobotOperation.Automation);
 
             ObjectStatus = _automation.AttachedItem != null ? "Object: attached" : "Object: free";
 
-            if (_obstacleTestActive)
-            {
-                if (_automation.Diagnostic != "Operation finished")
-                {
-                    _obstacles.Clear();
-                    AutomationSceneChanged?.Invoke();
-                }
-
-                _obstacleTestActive = false;
-            }
+            EndObstacleTest();
 
             if (_automation.Diagnostic == "Operation finished")
             {
@@ -1020,6 +1135,6 @@ namespace RoboticArm.ViewModels
         }
 
         private static double ParseDelay(string text, double fallback)
-            => double.TryParse(text, out double value) && value >= 0 ? value : fallback;
+            => NumericInput.TryParse(text, out double value) && value >= 0 ? value : fallback;
     }
 }
